@@ -1,2 +1,2 @@
-# GSNN
-Graph Structured Neural Networks
+# Graph Structured Neural Networks (GSNN)
+
