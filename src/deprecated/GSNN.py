@@ -1,5 +1,5 @@
 import torch 
-from src.models.Node import Node
+from src.deprecated.Node import Node
 from src.models import utils
 
 class GSNN(torch.nn.Module): 

@@ -1,40 +1,97 @@
-def get_degree(edge_index, idx): 
+import torch
+
+def get_W1_indices(edge_index, channels): 
     '''
-    return the in/out degree of a given node
+    # how to create input layer , e.g., edge values -> node indices 
+
+
+    '''
+    row = [] 
+    col = []
+    for edge_id, (src, node_id) in enumerate(edge_index.detach().cpu().numpy().T):
+        for k in range(channels): 
+            row.append(edge_id)
+            col.append(channels*node_id.item() + k)
+
+    row = torch.tensor(row, dtype=torch.float32)
+    col = torch.tensor(col, dtype=torch.float32)
+    indices = torch.stack((row,col), dim=0)
+    return indices
+
+
+def get_W2_indices(function_nodes, channels): 
+    '''
+    # how to create node -> node latent weight indices 
+
+    # for node_id in function_nodes 
+        # for k in channels: 
+            # for k2 in channels: 
+                # add weight indice: (node_id + k, node_id + k2)
+    '''
+    row = []
+    col = []
+    for node_id in function_nodes: 
+        for k in range(channels): 
+            for k2 in range(channels): 
+                row.append(channels*node_id.item() + k)
+                col.append(channels*node_id.item() + k2)
+
+    row = torch.tensor(row, dtype=torch.float32)
+    col = torch.tensor(col, dtype=torch.float32)
+    indices = torch.stack((row,col), dim=0)
+    return indices
+
+def get_W3_indices(edge_index, function_nodes, channels): 
+    '''
+    # how to create node -> edge indices 
+
+    # for node_id in function_nodes 
+
+        # filter to edges from node_id 
+        # src, dst = edge_index
+        # out_edges = (src == node_id).nonzero()
+        # for k in channels: 
+            # for out_edge_idx in out_edges: 
+                # add weight indice:   (node_id + k, out_edge_idx)
+    '''
+    row = [] 
+    col = []
+    for node_id in function_nodes: 
+        
+        src,dst = edge_index 
+        out_edges = (src == node_id).nonzero(as_tuple=True)[0]
+
+        for k in range(channels):
+            
+            for edge_id in out_edges: 
+
+                row.append(channels*node_id.item() + k)
+                col.append(edge_id.item())
+
+    row = torch.tensor(row, dtype=torch.float32)
+    col = torch.tensor(col, dtype=torch.float32)
+    indices = torch.stack((row,col), dim=0)
+    return indices
+
+def node2edge(x, edge_index): 
+    '''
+    convert from node indexed attributes to edge indexed attributes
     '''
     src,dst = edge_index 
-    
-    out_degree = (src == idx).sum()
-    in_degree = (dst == idx).sum()
+    return x[:, src] 
 
-    return in_degree, out_degree
-
-
-def get_in_out_ixs(edge_index, idx): 
+def edge2node(x, edge_index, output_node_mask): 
+    ''' 
+    convert from edge indexed attributes `x` to node indexed attributes
+    NOTE: only maps to output nodes (eg., in-degree = 1) to avoid collisions; all other nodes (input nodes + function nodes) will have value of 0. 
     '''
-    Return the edge id (e.g., index of each edge in `edge_index` that corresponds to a given node `idx` inputs/outputs)
+    output_nodes = output_node_mask.nonzero(as_tuple=True)[0]
+    src, dst = edge_index 
+    output_edge_mask = torch.isin(dst, output_nodes)
 
-    example: 
-        edge_index = [[0, 1, 2, 3],
-                      [1, 2, 3, 4]]
-                       |  |  |  | 
-        id/index       0  1  2  3
+    B = x.size(0)
+    out = torch.zeros(B, output_node_mask.size(0), dtype=torch.float32, device=x.device)
+    out[:, dst[output_edge_mask].view(-1)] = x[:, output_edge_mask].view(B, -1)
 
-        if idx = 1, return the edge ids to/from node 1
+    return out
 
-        in_ixs = [0], out_ixs = [1]
-    '''
-    src,dst = edge_index 
-    
-    in_ixs = (dst == idx).nonzero().view(-1)
-    out_ixs= (src == idx).nonzero().view(-1)
-
-    return in_ixs, out_ixs
-
-
-def get_children(edge_index, idx): 
-    '''
-    return the descendents of a given node. 
-    '''
-    src,dst = edge_index 
-    return dst[src == idx]
