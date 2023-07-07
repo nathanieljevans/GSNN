@@ -27,7 +27,7 @@ class GSNN(torch.nn.Module):
 
         self.nonlin = nonlin() 
 
-        self.alpha = torch.nn.Parameter(torch.tensor([[[0.5]]]))
+        self.alpha = torch.nn.Parameter(torch.tensor([[[0.]]]))
 
     def forward(self, x):
         '''

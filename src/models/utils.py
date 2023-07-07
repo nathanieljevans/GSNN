@@ -2,6 +2,60 @@ import torch
 import copy 
 import numpy as np
 
+
+def get_activation(act): 
+
+    if act == 'relu': 
+        return torch.nn.ReLU 
+    elif act == 'elu': 
+        return torch.nn.ELU 
+    elif act == 'tanh': 
+        return torch.nn.Tanh
+    elif act == 'mish': 
+        return torch.nn.Mish 
+    elif act == 'selu': 
+        return torch.nn.SELU  
+    elif act == 'softplus': 
+        return torch.nn.Softplus  
+    else:
+        raise ValueError(f'unrecognized activation function: {act}')
+
+def get_optim(optim): 
+
+    if optim == 'adam': 
+        return torch.optim.Adam 
+    elif optim == 'sgd': 
+        return torch.optim.SGD 
+    elif optim == 'rmsprop': 
+        return torch.optim.RMSprop
+    else:
+        raise ValueError(f'unrecognized optim argument: {optim}')
+    
+def get_crit(crit): 
+
+    if crit == 'mse': 
+        return torch.nn.MSELoss
+    elif crit == 'huber': 
+        return torch.nn.HuberLoss
+    else:
+        raise ValueError(f'unrecognized optim argument: {crit}')
+    
+def get_scheduler(optim, args, loader): 
+
+    if args.sched == 'none': 
+        return None
+    elif args.sched == 'onecycle': 
+        return torch.optim.lr_scheduler.OneCycleLR(optim, max_lr=args.lr, 
+                                                    epochs=args.epochs, 
+                                                    steps_per_epoch=len(loader), 
+                                                    pct_start=0.3)
+    elif args.sched == 'cosine': 
+        return torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs*len(loader), eta_min=1e-7)
+    else:
+        raise ValueError(f'unrecognized lr scheduler: {args.sched}')
+    
+
+
 def get_W1_indices(edge_index, channels): 
     '''
     # how to create input layer , e.g., edge values -> node indices 

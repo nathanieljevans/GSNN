@@ -55,6 +55,21 @@ def get_args():
     parser.add_argument("--wd", type=float, default=0.,
                         help="weight decay")
     
+    parser.add_argument("--nonlin", type=str, default='elu',
+                        help="non-linearity function to use [relu, elu, mish, softplus, tanh]")
+    
+    parser.add_argument("--optim", type=str, default='adam',
+                        help="optimization algorithm to use [adam, sgd, rmsprop]")
+    
+    parser.add_argument("--crit", type=str, default='mse',
+                        help="loss function (criteria) to use [mse, huber]")
+    
+    parser.add_argument("--sched", type=str, default='none',
+                        help="lr scheduler [onecycle, cosine, none]")
+    
+    parser.add_argument("--clip_grad", type=float, default=None,
+                        help="gradient clipping by norm")
+    
     return parser.parse_args()
     
 
@@ -63,6 +78,7 @@ if __name__ == '__main__':
 
     # get args 
     args = get_args()
+    args.model = 'gsnn'
 
     print()
     print(args)
@@ -96,8 +112,7 @@ if __name__ == '__main__':
     test_dataset = LincsDataset(root=f'{args.data}', sig_ids=test_ids)
     test_loader = DataLoader(test_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=True)
 
-    if args.randomize: 
-        data.edge_index = utils.randomize(data)
+    if args.randomize: data.edge_index = utils.randomize(data)
 
     torch.save(data, out_dir + '/Data.pt')
 
@@ -108,13 +123,14 @@ if __name__ == '__main__':
              layers=args.layers, 
              dropout=args.dropout,
              residual=not args.no_residual,
-             nonlin=torch.nn.ELU).to(device)
+             nonlin=utils.get_activation(args.nonlin)).to(device)
     
     n_params = sum([p.numel() for p in model.parameters()])
     print('# params', n_params)
 
-    optim = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
-    crit = torch.nn.MSELoss()
+    optim = utils.get_optim(args.optim)(model.parameters(), lr=args.lr, weight_decay=args.wd)
+    crit = utils.get_crit(args.crit)()
+    scheduler = utils.get_scheduler(optim, args, train_loader)
 
     for epoch in range(args.epochs):
         big_tic = time.time()
@@ -129,7 +145,9 @@ if __name__ == '__main__':
 
             loss = crit(yhat, y)
             loss.backward()
+            if args.clip_grad is not None: torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
             optim.step()
+            if scheduler is not None: scheduler.step()
 
             with torch.no_grad(): 
 

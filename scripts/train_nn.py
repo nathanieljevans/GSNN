@@ -22,6 +22,9 @@ def get_args():
     parser.add_argument("--out", type=str, default='../output/',
                         help="path to output directory")
     
+    parser.add_argument("--nonlin", type=str, default='elu',
+                        help="non-linearity function to use")
+    
     parser.add_argument("--batch", type=int, default=512,
                         help="training batch size")
     
@@ -52,6 +55,18 @@ def get_args():
     parser.add_argument("--wd", type=float, default=0.,
                         help="weight decay")
     
+    parser.add_argument("--optim", type=str, default='adam',
+                        help="optimization algorithm to use [adam, sgd, rmsprop]")
+    
+    parser.add_argument("--crit", type=str, default='mse',
+                        help="loss function (criteria) to use [mse, huber]")
+    
+    parser.add_argument("--clip_grad", type=float, default=None,
+                        help="gradient clipping by norm")
+    
+    parser.add_argument("--sched", type=str, default='none',
+                        help="lr scheduler [onecycle, cosine, none]")
+    
     return parser.parse_args()
     
 
@@ -60,6 +75,7 @@ if __name__ == '__main__':
 
     # get args 
     args = get_args()
+    args.model = 'nn'
 
     print()
     print(args)
@@ -103,13 +119,14 @@ if __name__ == '__main__':
                 out_channels=int(data.output_node_mask.sum().item()), 
                 layers=args.layers, 
                 dropout=args.dropout, 
-                nonlin=torch.nn.ELU).to(device)
+                nonlin=utils.get_activation(args.nonlin)).to(device)
     
     n_params = sum([p.numel() for p in model.parameters()])
     print('# params', n_params)
 
-    optim = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
-    crit = torch.nn.MSELoss()
+    optim = utils.get_optim(args.optim)(model.parameters(), lr=args.lr, weight_decay=args.wd)
+    crit = utils.get_crit(args.crit)()
+    scheduler = utils.get_scheduler(optim, args, train_loader)
 
     for epoch in range(args.epochs):
         big_tic = time.time()
@@ -125,7 +142,9 @@ if __name__ == '__main__':
 
             loss = crit(yhat, y)
             loss.backward()
+            if args.clip_grad is not None: torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
             optim.step()
+            if scheduler is not None: scheduler.step()
 
             with torch.no_grad(): 
 
