@@ -34,8 +34,8 @@ def get_args():
     parser.add_argument("--randomize", action='store_true',
                         help="whether to randomize the structural graph")
     
-    parser.add_argument("--residual", action='store_true',
-                        help="enable residual connections")
+    parser.add_argument("--no_residual", action='store_true',
+                        help="disable residual connections")
     
     parser.add_argument("--ignore_cuda", action='store_true',
                         help="whether to ignore available cuda GPU")
@@ -107,7 +107,7 @@ if __name__ == '__main__':
              output_node_mask=data.output_node_mask, 
              layers=args.layers, 
              dropout=args.dropout,
-             residual=args.residual,
+             residual=not args.no_residual,
              nonlin=torch.nn.ELU).to(device)
     
     n_params = sum([p.numel() for p in model.parameters()])

@@ -27,17 +27,18 @@ class GSNN(torch.nn.Module):
 
         self.nonlin = nonlin() 
 
+        self.alpha = torch.nn.Parameter(torch.tensor([[[0.5]]]))
+
     def forward(self, x):
         '''
         Assumes x is `node` indexed 
         ''' 
-
+        alpha = torch.sigmoid(self.alpha)
         # convert x from node-indexed to edge-indexed
-        x0 = utils.node2edge(x, self.edge_index) 
-        x = x0
-        if self.residual: xs = []
+        x0 = utils.node2edge(x, self.edge_index)
+        x=x0
+        if self.residual: x_last = x
         for l in range(self.layers): 
-
             x = self.lin1(x)
             x = self.norm1(x)
             x = self.nonlin(x)
@@ -47,10 +48,10 @@ class GSNN(torch.nn.Module):
             x = self.nonlin(x)
             x = self.dropout(x)
             x = self.lin3(x) 
-            x = x + x0
-            if self.residual: xs.append(x)
-
-        if self.residual: x = torch.stack(xs, dim=-1).mean(dim=-1)
+            x = x + x0 
+            if self.residual: 
+                x = (1-alpha)*x + alpha*x_last
+                x_last = x
 
         # convert x from edge-indexed to node-indexed
         return utils.edge2node(x, self.edge_index, self.output_node_mask)
