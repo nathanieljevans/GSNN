@@ -1,0 +1,33 @@
+name: gsnn
+
+channels: 
+    - defaults 
+    - pytorch 
+    - nvidia 
+    - conda-forge
+    - pyg
+    - mcs07
+
+dependencies:
+    - python=3.10
+    - matplotlib
+    - pubchempy
+    - pyg
+    - pytorch=2.0
+    - torchvision
+    - seaborn
+    - scikit-learn
+    - cudatoolkit=11.7
+    - h5py
+    - tensorboard
+    - shapely
+    - statsmodels
+    - pip
+    - rdkit
+    - shap
+    - pip:
+        - ipykernel
+        - umap-learn
+        - biopython
+        - obonet
+        - omnipath 

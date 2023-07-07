@@ -1,4 +1,6 @@
 import torch
+import copy 
+import numpy as np
 
 def get_W1_indices(edge_index, channels): 
     '''
@@ -95,3 +97,112 @@ def edge2node(x, edge_index, output_node_mask):
 
     return out
 
+def predict_gsnn(loader, model, data, device): 
+
+    model = model.eval()
+
+    ys = [] 
+    yhats = [] 
+    sig_ids = []
+    
+    with torch.no_grad(): 
+        for i,(x, y, sig_id) in enumerate(loader): 
+            print(f'progress: {i}/{len(loader)}', end='\r')
+
+            yhat = model(x.to(device))[:, data.output_node_mask]
+            y = y.to(device).squeeze(-1)[:, data.output_node_mask]
+
+            yhat = yhat.detach().cpu() 
+            y = y.detach().cpu()
+
+            ys.append(y)
+            yhats.append(yhat)
+            sig_ids += sig_id
+
+    y = torch.cat(ys, dim=0)
+    yhat = torch.cat(yhats, dim=0)
+
+    return y, yhat, sig_ids
+
+def predict_nn(loader, model, data, device): 
+
+    model = model.eval()
+
+    ys = [] 
+    yhats = [] 
+    sig_ids = []
+    
+    with torch.no_grad(): 
+        for i,(x, y, sig_id) in enumerate(loader): 
+            print(f'progress: {i}/{len(loader)}', end='\r')
+
+            x = x[:, data.input_node_mask].to(device).squeeze(-1)
+            yhat = model(x)
+            y = y.to(device).squeeze(-1)[:, data.output_node_mask]
+
+            yhat = yhat.detach().cpu() 
+            y = y.detach().cpu()
+
+            ys.append(y)
+            yhats.append(yhat)
+            sig_ids += sig_id
+
+    y = torch.cat(ys, dim=0)
+    yhat = torch.cat(yhats, dim=0)
+
+    return y, yhat, sig_ids
+
+def predict_gnn(loader, model, data, device): 
+
+    model = model.eval()
+
+    ys = [] 
+    yhats = [] 
+    sig_ids = []
+    
+    with torch.no_grad(): 
+        for i,(batch) in enumerate(loader): 
+
+            yhat = model(edge_index=batch.edge_index.to(device), x=batch.x.to(device))
+            
+            #  select output nodes
+            yhat = yhat[batch.output_node_mask]
+            y = batch.y.to(device)[batch.output_node_mask]
+
+            B = len(batch.sig_id)
+
+            yhat = yhat.view(B, -1).detach().cpu()
+            y = y.view(B, -1).detach().cpu()
+
+            ys.append(y)
+            yhats.append(yhat)
+            sig_ids += batch.sig_id
+
+    y = torch.cat(ys, dim=0).detach().cpu().numpy()
+    yhat = torch.cat(yhats, dim=0).detach().cpu().numpy()
+
+    return y, yhat, sig_ids
+
+def randomize(data): 
+    print('NOTE: RANDOMIZING EDGE INDEX')
+    # permute edge index 
+    edge_index = copy.deepcopy(data.edge_index)
+    func_nodes  = (~(data.input_node_mask | data.output_node_mask)).nonzero(as_tuple=True)[0].detach().cpu().numpy()
+
+    src,dst = edge_index[:, data.input_edge_mask]
+    dst = torch.tensor(np.random.choice(func_nodes, size=(len(dst))), dtype=torch.long)
+    edge_index[:, data.input_edge_mask] = torch.stack((src, dst), dim=0)
+
+
+    func_edge_mask = ~(data.input_edge_mask | data.output_edge_mask)
+    src,dst = edge_index[:, func_edge_mask]
+    src = torch.tensor(np.random.choice(func_nodes, size=(len(dst))), dtype=torch.long)
+    dst = torch.tensor(np.random.choice(func_nodes, size=(len(dst))), dtype=torch.long)
+    edge_index[:, func_edge_mask] = torch.stack((src, dst), dim=0)
+
+
+    src,dst = edge_index[:, data.output_edge_mask]
+    src = torch.tensor(np.random.choice(func_nodes, size=(len(dst))), dtype=torch.long)
+    edge_index[:, data.output_edge_mask] = torch.stack((src, dst), dim=0)
+
+    return edge_index
