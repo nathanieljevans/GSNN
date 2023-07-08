@@ -59,10 +59,10 @@ def get_args():
     parser.add_argument("--min_obs_per_cell", type=int, default=10,
                         help="cell line inclusion criteria, must have at least X observations")
 
-    parser.add_argument("--test_prop", type=float, default=0.1,
+    parser.add_argument("--test_prop", type=float, default=0.2,
                         help="proportion of cell lines to hold-out for the test set")
     
-    parser.add_argument("--val_prop", type=float, default=0.1,
+    parser.add_argument("--val_prop", type=float, default=0.,
                         help="proportion of cell lines to hold-out for the validation set")
     
     parser.add_argument('--pathways', nargs='+', default=['R-HSA-9006934'],
@@ -121,6 +121,10 @@ def row2obs(row, dataset, dataset_row, uni2dataset_rowidx, sigid2idx, data, node
     # torch.tensor(dataset[obs['y_idx'], :][geneid_idxs], dtype=torch.float16) 
 
     y_lincs = dataset[obs['y_idx'], :]
+
+    # 
+    #
+    # 
 
     for lincs_node in lincs_nodes: 
         uniprot = lincs_node.split('__')[1]
@@ -374,9 +378,7 @@ if __name__ == '__main__':
     drug_space = np.sort(druginfo2.pert_id.unique())
     print('\tdrug space size:', len(drug_space))
 
-    
     print('filtering drugs based on proportion of downstream LINCS nodes...')
-
     # create a homogenous graph with one edge type to use for infering "upstream" genes 
     all_edges = pd.concat([dorothea, omnipath, pathways_extra, tf_mirna, mirna], axis=0)
     G = nx.DiGraph()

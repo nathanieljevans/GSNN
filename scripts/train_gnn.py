@@ -78,6 +78,9 @@ def get_args():
     parser.add_argument("--sched", type=str, default='none',
                         help="lr scheduler [onecycle, cosine, none]")
     
+    parser.add_argument("--nonlin", type=str, default='elu',
+                        help="non-linearity function to use")
+    
     return parser.parse_args()
     
 
@@ -152,12 +155,18 @@ if __name__ == '__main__':
     optim = utils.get_optim(args.optim)(model.parameters(), lr=args.lr, weight_decay=args.wd)
     crit = utils.get_crit(args.crit)()
     scheduler = utils.get_scheduler(optim, args, train_loader)
+    logger = utils.TBLogger(out_dir + '/tb/')
 
     for epoch in range(args.epochs):
         big_tic = time.time()
         model = model.train()
         losses = []
         for i, batch in enumerate(train_loader): 
+
+            if len(batch.sig_id) == 1: 
+                # BUG: if batch only has 1 obs it fails
+                continue 
+
             tic = time.time()
             optim.zero_grad() 
 
@@ -192,6 +201,10 @@ if __name__ == '__main__':
         r2_test = r2_score(y, yhat, multioutput='variance_weighted')
         r_flat_test = np.corrcoef(y.ravel(), yhat.ravel())[0,1]
 
+        logger.log(epoch, loss_train, r2_test, r_flat_test)
         torch.save(model, out_dir + '/model.pt')
 
         print(f'Epoch: {epoch} || loss (train): {loss_train:.3f} || r2 (test): {r2_test:.2f} || r flat (test): {r_flat_test:.2f} || elapsed: {(time.time() - big_tic)/60:.2f} min')
+
+    # add test results + hparams
+    logger.add_hparam_results(args=args, y=y.detach().cpu().numpy(), yhat=yhat.detach().cpu().numpy())

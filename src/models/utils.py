@@ -1,6 +1,28 @@
 import torch
 import copy 
 import numpy as np
+import os
+from torch.utils.tensorboard import SummaryWriter
+from sklearn.metrics import r2_score
+
+class TBLogger():
+    def __init__(self, root):
+        ''''''
+        if not os.path.exists(root): os.mkdir(root)
+        self.writer = SummaryWriter(log_dir = root)
+
+    def add_hparam_results(self, args, y, yhat):
+
+        hparam_dict = args.__dict__
+        metric_dict = {'R2':r2_score(y, yhat, multioutput='variance_weighted'), 
+                       'r_flat': np.corrcoef(y.ravel(), yhat.ravel())[0,1],
+                       'MSE': np.mean((y - yhat)**2)}
+        self.writer.add_hparams(hparam_dict, metric_dict)
+
+    def log(self, epoch, train_loss, test_r2, test_r_flat):
+        self.writer.add_scalar('train-loss', train_loss, epoch)
+        self.writer.add_scalar('test-r2', test_r2, epoch)
+        self.writer.add_scalar('test-corr-flat', test_r_flat, epoch)
 
 
 def get_activation(act): 

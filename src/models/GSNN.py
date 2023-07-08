@@ -42,12 +42,13 @@ class GSNN(torch.nn.Module):
             x = self.lin1(x)
             x = self.norm1(x)
             x = self.nonlin(x)
-            x = self.dropout(x)
+            #x = self.dropout(x)
             x = self.lin2(x)
             x = self.norm2(x)
             x = self.nonlin(x)
-            x = self.dropout(x)
+            #x = self.dropout(x)
             x = self.lin3(x) 
+            x = self.dropout(x) # dropout on edges ? or dropout on node channels?
             x = x + x0 
             if self.residual: 
                 x = (1-alpha)*x + alpha*x_last

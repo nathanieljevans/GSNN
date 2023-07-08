@@ -1,6 +1,9 @@
 # Graph Structured Neural Networks (GSNN)
 
+Nathaniel Evans 
+evansna@ohsu.edu
 
+## Getting Started
 
 ```bash 
 $ mamba env create -f environment.yml 
@@ -13,7 +16,7 @@ $ ./get_data.sh /path/to/download/dir/
 ```
 
 ```bash 
-(gsnn) $ python make_data.py --data /path/to/download/dir/ --out /path/to/processed/dir/
+(gsnn) $ python make_data.py --data /path/to/download/dir/ --out /path/to/processed/dir/ --pathways R-HSA-9006934 --feature_space landmark best-inferred --stitch_targets --targetome_targets
 ```
 
 ```bash 
@@ -31,14 +34,7 @@ $ ./get_data.sh /path/to/download/dir/
 NOTE: use ```$ python <fn> --help``` to get optional command line arguments. 
 
 
-
-
-
-
-
-
-
-### Reactome Pathways Suggestions
+## Reactome Pathways Suggestions
 
 | **Reactome ID** 	| **Name**                               	| **Size** 	|
 |-----------------	|----------------------------------------	|----------	|
