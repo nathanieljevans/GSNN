@@ -41,6 +41,9 @@ def get_args():
     parser.add_argument("--stitch_targets", action='store_true',
                         help="whether to include drug-targets from the STITCH database'")
     
+    parser.add_argument("--full_grn", action='store_true',
+                        help="whether to augment protein-space with downstream GRN transcription factors'")
+    
     parser.add_argument("--min_drug_score", type=int, default=999,
                         help="STITCH drug-target confidence score required for inclusion [0,1000]")
     
@@ -70,7 +73,7 @@ def get_args():
     
     return parser.parse_args()
 
-def row2obs(row, dataset, dataset_row, uni2dataset_rowidx, sigid2idx, data, node2idx, meta): 
+def row2obs(row, dataset, dataset_row, uni2dataset_rowidx, sigid2idx, data, node2idx, meta, omics): 
     ''' 
 
     Args: 
@@ -83,7 +86,9 @@ def row2obs(row, dataset, dataset_row, uni2dataset_rowidx, sigid2idx, data, node
     '''
     #A = time.time() 
 
-    lincs_nodes, drug_nodes, expr_nodes, N, input_nodes, output_nodes, func_nodes = meta
+    expr, methyl, mut, cnv = omics
+
+    lincs_nodes, drug_nodes, expr_nodes, cnv_nodes, methyl_nodes, mut_nodes, N, input_nodes, output_nodes, func_nodes = meta
 
     obs = {}
 
@@ -108,23 +113,36 @@ def row2obs(row, dataset, dataset_row, uni2dataset_rowidx, sigid2idx, data, node
         val = expr.loc[obs['cell_iname'], node.split('__')[1]]
         x_dict[node] = [val]
 
-    x_df = pd.DataFrame(x_dict)
+    # methyl inputs 
+    for node in methyl_nodes: 
+        val = methyl.loc[obs['cell_iname'], node.split('__')[1]]
+        x_dict[node] = [val]
+
+    # cnv inputs 
+    for node in cnv_nodes: 
+        val = cnv.loc[obs['cell_iname'], node.split('__')[1]]
+        x_dict[node] = [val]
+
+    # mut inputs 
+    for node in mut_nodes: 
+        val = mut.loc[obs['cell_iname'], node.split('__')[1]]
+        x_dict[node] = [val]
     
-    #obs['x_dataframe'] = x_df
+    x_df = pd.DataFrame(x_dict)
     obs['x'] = torch.tensor(x_df[data.node_names].values, dtype=torch.float32).reshape(-1,1)
 
-    #C = time.time() 
 
     # only output nodes should be nonzero 
     # shape: (num_nodes, 1)
-    y_dict = {**{n:[0.] for n in func_nodes}, **{n:[0.] for n in drug_nodes}, **{n:[0.] for n in expr_nodes}}
+    y_dict = {**{n:[0.] for n in func_nodes}, 
+              **{n:[0.] for n in drug_nodes}, 
+              **{n:[0.] for n in expr_nodes}, 
+              **{n:[0.] for n in mut_nodes}, 
+              **{n:[0.] for n in methyl_nodes}, 
+              **{n:[0.] for n in cnv_nodes}}
     # torch.tensor(dataset[obs['y_idx'], :][geneid_idxs], dtype=torch.float16) 
 
     y_lincs = dataset[obs['y_idx'], :]
-
-    # 
-    #
-    # 
 
     for lincs_node in lincs_nodes: 
         uniprot = lincs_node.split('__')[1]
@@ -197,7 +215,32 @@ if __name__ == '__main__':
         uni2rea = uni2rea[lambda x: (x.pathway.isin(args.pathways)) & (x.species == 'Homo sapiens')]
 
         include_uniprot = uni2rea.uniprot.unique()
-        print('\tpathway(s) size:', len(include_uniprot))
+        print('\tpathway(s) size (un-augmented):', len(include_uniprot))
+
+        if args.full_grn: 
+            print('\tincluding full GRN (augmenting protein-space with downstream TFs)...')
+            include_uniprot = set(include_uniprot)
+            # Add proteins that are involved in the GRN 
+            # e.g., TF(in) -> mRNA -> TF(out) -> ...
+            # or    TF(in) -> miRNA -> mRNA -> TF(out) -> ...
+            # step 1: for tfs in pathway, identify all downstream TFs (via mRNA or miRNA)
+            tfs_all = set(dorothea.source.unique())
+            tfs_in = tfs_all.intersection(set(include_uniprot))
+            GRN = nx.DiGraph()
+            for src,dst in dorothea[['source', 'target']].values: 
+                GRN.add_edge(src,dst)
+            for src,dst in tf_mirna[['source', 'target']].values: 
+                GRN.add_edge(src,dst)
+            for src,dst in mirna[['source', 'target']].values: 
+                GRN.add_edge(src,dst)
+            for tf in tfs_in: 
+                ds = set(downstream_nodes(GRN, tf, 10, None))
+                ds_tfs = ds.intersection(tfs_all)
+                include_uniprot = include_uniprot.union(ds_tfs)
+
+            include_uniprot = np.array(list(include_uniprot))
+            print('\t\tpathway(s) size (GRN-augmented):', len(include_uniprot))
+        
 
         # filter `dorothea` proteins (source)
         dorothea = dorothea[lambda x: x.source.isin(include_uniprot)]
@@ -415,8 +458,85 @@ if __name__ == '__main__':
     assert druginfo2.pert_id.unique().shape[0] == len(drug_space), 'drugspace does not match available target infomation in druginfo2'
 
 
+    #####################################################################################################################
+    #####################################################################################################################
+    # OMICS
+    #####################################################################################################################
+    #####################################################################################################################
+    print('creating cell-space and loading omics...')
+    siginfo = pd.read_csv(f'{args.data}/siginfo_beta.txt', sep='\t', low_memory=False)
 
-    # 
+    siginfo2 = siginfo[lambda x: x.sig_id.isin(drug_sig_ids)]
+    print('# drugspace obs', siginfo2.shape)
+
+    # get initial cell space defined by having at least `__MIN_OBS_PER_CELL_LINE__` observations per cell line for inclusion
+    cell_cnts = siginfo2.groupby('cell_iname').count()[['sig_id']].sort_values('sig_id', ascending=False).reset_index()
+    cell_cnts = cell_cnts[lambda x: x.sig_id >= args.min_obs_per_cell]
+    cell_space = cell_cnts.cell_iname.unique().astype(str)
+
+    print('\tloading omics...')
+    methyl  = load_methyl(path=args.data, extpath='../extdata/') ; print('\t\tmethyl loaded.')
+    expr    = load_expr(path=args.data, extpath='../extdata/', zscore=False, clip_val=10) ; print('\t\texpr loaded.')
+    cnv     = load_cnv(path=args.data, extpath='../extdata/') ; print('\t\tcnv loaded.')
+    mut     = load_mut(path=args.data, extpath='../extdata/') ; print('\t\tmut loaded.')
+
+    [expr, methyl, cnv, mut], cell_space = filter_to_common_cellspace(omics=[expr, methyl, cnv, mut], cell_space=cell_space)
+
+    print('\t\tcell space size:', len(cell_space))
+
+    required_nodes = np.unique(rna_space.tolist() + protein_space.tolist())
+
+    # NOTE: We don't need to include an omic input for every node 
+    #       we can only include omic inputs for those nodes that we have information. 
+    #       therefore we don't need to impute missing omics
+
+    #expr = impute_missing_gene_ids(omic=expr, gene_space=required_nodes, fill_value=0)
+    #cnv = impute_missing_gene_ids(omic=cnv, gene_space=required_nodes, fill_value=0)
+    #methyl = impute_missing_gene_ids(omic=methyl, gene_space=required_nodes, fill_value=0)
+    #mut = impute_missing_gene_ids(omic=mut, gene_space=required_nodes, fill_value=0)
+
+    # NOTE: Because we don't need to include an omic for every node, we can similarly filter to omics that have good variance
+    # Remove the bottom 10% of genes with lowest variance
+    expr_genes = list(expr.columns[expr.std(axis=0) >= np.quantile(expr.std(axis=0), q=0.1)])
+    methyl_genes = list(methyl.columns[methyl.std(axis=0) >= np.quantile(methyl.std(axis=0), q=0.1)])
+    mut_genes = list(mut.columns[mut.std(axis=0) >= np.quantile(mut.std(axis=0), q=0.1)])
+    cnv_genes = list(cnv.columns[cnv.std(axis=0) >= np.quantile(cnv.std(axis=0), q=0.1)])
+
+    # only include omics that are in rna space or protein space
+    expr_genes = [x for x in expr_genes if (x in protein_space) | (x in rna_space)]
+    methyl_genes = [x for x in methyl_genes if (x in protein_space) | (x in rna_space)]
+    mut_genes = [x for x in mut_genes if (x in protein_space) | (x in rna_space)]
+    cnv_genes = [x for x in cnv_genes if (x in protein_space) | (x in rna_space)]
+
+    expr = expr[expr_genes]
+    mut = mut[mut_genes]
+    methyl = methyl[methyl_genes]
+    cnv = cnv[cnv_genes]
+
+    print('\t# expr genes', len(expr_genes))
+    print('\t# mut genes', len(mut_genes))
+    print('\t# methyl genes', len(methyl_genes))
+    print('\t# cnv genes', len(cnv_genes))
+    
+    # NOTE: We can also normalize across cell line (within a given omic), since it relative now. 
+    # omics are (cell x gene)
+    expr = (expr - expr.mean(axis=0)) / (expr.std(axis=0) + 1e-8)
+    methyl = (methyl - methyl.mean(axis=0)) / (methyl.std(axis=0) + 1e-8)
+    mut = (mut - mut.mean(axis=0)) / (mut.std(axis=0) + 1e-8)
+    cnv = (cnv - cnv.mean(axis=0)) / (cnv.std(axis=0) + 1e-8)
+
+    # filter siginfo to cell space 
+    siginfo2 = siginfo2[lambda x: x.cell_iname.isin(cell_space)]
+
+    # double check we have obs for each drug 
+    if siginfo2.pert_id.unique().shape[0] != len(drug_space): 
+        print('\tWARNING: some drugs in drug-space do not have observations (after cell-space filter)')
+
+    #####################################################################################################################
+    #####################################################################################################################
+    # GRAPH
+    #####################################################################################################################
+    #####################################################################################################################
     print('creating pytorch-geometric graph/data object...')
 
     # omnipath.interactions.Dorothea        :: protein (TF) -> gene 
@@ -474,14 +594,36 @@ if __name__ == '__main__':
                         'input_edge' : False, 
                         'output_edge' : False})
 
+    # NOTE: 
     # expr omics input values
-    expr_ = pd.DataFrame({'source': ['EXPR__' + x for x in rna_space] + ['EXPR__' + x for x in protein_space],
-                        'target': ['RNA__' + x for x in rna_space] + ['PROTEIN__' + x for x in protein_space],
+    expr_ = pd.DataFrame({'source': ['EXPR__' + x for x in expr_genes if x in rna_space] + ['EXPR__' + x for x in expr_genes if x in protein_space],
+                        'target': ['RNA__' + x for x in expr_genes if x in rna_space] + ['PROTEIN__' + x for x in expr_genes if x in protein_space],
                         'edge_type':'expr_input', 
                         'input_edge' : True, 
                         'output_edge' : False})
+    
+    # methylation
+    methyl_ = pd.DataFrame({'source': ['METHYL__' + x for x in methyl_genes if x in rna_space] + ['METHYL__' + x for x in methyl_genes if x in protein_space],
+                        'target': ['RNA__' + x for x in methyl_genes if x in rna_space] + ['PROTEIN__' + x for x in methyl_genes if x in protein_space],
+                        'edge_type':'methyl_input', 
+                        'input_edge' : True, 
+                        'output_edge' : False})
+    
+    # mut
+    mut_ = pd.DataFrame({'source': ['MUT__' + x for x in mut_genes if x in rna_space] + ['MUT__' + x for x in mut_genes if x in protein_space],
+                        'target': ['RNA__' + x for x in mut_genes if x in rna_space] + ['PROTEIN__' + x for x in mut_genes if x in protein_space],
+                        'edge_type':'mut_input', 
+                        'input_edge' : True, 
+                        'output_edge' : False})
+    
+    # cnv
+    cnv_ = pd.DataFrame({'source': ['CNV__' + x for x in cnv_genes if x in rna_space] + ['CNV__' + x for x in cnv_genes if x in protein_space],
+                        'target': ['RNA__' + x for x in cnv_genes if x in rna_space] + ['PROTEIN__' + x for x in cnv_genes if x in protein_space],
+                        'edge_type':'cnv_input', 
+                        'input_edge' : True, 
+                        'output_edge' : False})
 
-    edgelist = pd.concat([doro, omni, path, tfmirna, mirna_, drug, lincs, trans, expr_], axis=0)
+    edgelist = pd.concat([doro, omni, path, tfmirna, mirna_, drug, lincs, trans, expr_, methyl_, cnv_, mut_], axis=0)
 
     node_space = np.sort(np.unique(edgelist.source.values.tolist() + edgelist.target.values.tolist()))
     node2idx = {n:i for i,n in enumerate(node_space)}
@@ -497,7 +639,6 @@ if __name__ == '__main__':
     G = nx.DiGraph()
     for i,row in edgelist.iterrows(): 
         G.add_edge(row.source, row.target)
-
 
     nodes_to_remove = [] 
 
@@ -528,7 +669,7 @@ if __name__ == '__main__':
     print('\tTotal # of edges:', len(edgelist))
 
 
-    data            = pyg.data.Data()
+    data = pyg.data.Data()
 
     data.node_names = node_space
 
@@ -553,40 +694,6 @@ if __name__ == '__main__':
     print('\t# output nodes:', data.output_node_mask.sum())
     print('\t# function nodes:', (~(data.output_node_mask | data.input_node_mask)).sum())
 
-
-    # 
-    print('creating cell-space and loading omics...')
-    siginfo = pd.read_csv(f'{args.data}/siginfo_beta.txt', sep='\t', low_memory=False)
-
-    siginfo2 = siginfo[lambda x: x.sig_id.isin(drug_sig_ids)]
-    print('# drugspace obs', siginfo2.shape)
-
-
-    # get initial cell space defined by having at least `__MIN_OBS_PER_CELL_LINE__` observations per cell line for inclusion
-    cell_cnts = siginfo2.groupby('cell_iname').count()[['sig_id']].sort_values('sig_id', ascending=False).reset_index()
-    cell_cnts = cell_cnts[lambda x: x.sig_id >= args.min_obs_per_cell]
-    cell_space = cell_cnts.cell_iname.unique().astype(str)
-
-    print('\tloading omics...')
-    #methyl  = load_methyl(path=__DATA__, extpath='../extdata/') ; print('\tmethyl loaded.')
-    expr    = load_expr(path=args.data, extpath='../extdata/', zscore=False, clip_val=10) ; print('\t\texpr loaded.')
-    #cnv     = load_cnv(path=__DATA__, extpath='../extdata/') ; print('\tcnv loaded.')
-    #mut     = load_mut(path=__DATA__, extpath='../extdata/') ; print('\tmut loaded.')
-
-    [expr], cell_space = filter_to_common_cellspace(omics=[expr], cell_space=cell_space)
-
-    print('\t\tcell space size:', len(cell_space))
-
-    required_nodes = np.unique(rna_space.tolist() + protein_space.tolist())
-
-    expr = impute_missing_gene_ids(omic=expr, gene_space=required_nodes, fill_value=0)
-
-    # filter siginfo to cell space 
-    siginfo2 = siginfo2[lambda x: x.cell_iname.isin(cell_space)]
-
-    # double check we have obs for each drug 
-    if siginfo2.pert_id.unique().shape[0] != len(drug_space): 
-        print('\tWARNING: some drugs in drug-space do not have observations (after cell-space filter)')
 
 
     print('processing and saving observations...')
@@ -619,19 +726,27 @@ if __name__ == '__main__':
     lincs_nodes = [nn for nn in data.node_names if 'LINCS__' in nn]
     drug_nodes = [nn for nn in data.node_names if ('DRUG__' in nn) & ((nn in data.node_names[data.input_node_mask.view(-1).detach().numpy()]))]
     expr_nodes = [nn for nn in data.node_names if ('EXPR__' in nn) & ((nn in data.node_names[data.input_node_mask.view(-1).detach().numpy()]))]
+    cnv_nodes = [nn for nn in data.node_names if ('CNV__' in nn) & ((nn in data.node_names[data.input_node_mask.view(-1).detach().numpy()]))]
+    methyl_nodes = [nn for nn in data.node_names if ('METHYL__' in nn) & ((nn in data.node_names[data.input_node_mask.view(-1).detach().numpy()]))]
+    mut_nodes = [nn for nn in data.node_names if ('MUT__' in nn) & ((nn in data.node_names[data.input_node_mask.view(-1).detach().numpy()]))]
+    #expr_nodes = ['EXPR__' + x for x in expr_genes]
+    #mut_nodes = ['MUT__' + x for x in mut_genes]
+    #methyl_nodes = ['METHYL__' + x for x in methyl_genes]
+    #cnv_nodes = ['CNV__' + x for x in cnv_genes]
+    
     N = len(data.node_names)
 
     input_nodes = data.node_names[data.input_node_mask]
     output_nodes = data.node_names[data.output_node_mask]
     func_nodes =  data.node_names[~(data.output_node_mask | data.input_node_mask)]
 
-    meta = [lincs_nodes, drug_nodes, expr_nodes, N, input_nodes, output_nodes, func_nodes]
+    omics = [expr, methyl, mut, cnv]
+    meta = [lincs_nodes, drug_nodes, expr_nodes, cnv_nodes, methyl_nodes, mut_nodes, N, input_nodes, output_nodes, func_nodes]
 
     # create obs
     for i,row in siginfo2.reset_index().iterrows(): 
         if (i%10)==0: 
             print(f'\tprogress: {i}/{len(siginfo2)}', end='\r')
-            #n_dict = {'trt_cp':0, 'trt_sh':0, 'trt_xpr':0, 'trt_oe':0}
 
         obs = row2obs(row=row, 
                     dataset=dataset_cp, 
@@ -640,7 +755,8 @@ if __name__ == '__main__':
                     sigid2idx=sigid2idx_cp, 
                     data=data, 
                     node2idx=node2idx,
-                    meta=meta)
+                    meta=meta,
+                    omics=omics)
 
         torch.save(obs, f'{args.out}/obs/{obs["sig_id"]}.pt')
 

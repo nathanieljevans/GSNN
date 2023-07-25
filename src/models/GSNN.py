@@ -14,6 +14,7 @@ class GSNN(torch.nn.Module):
         self.edge_index = edge_index
         function_nodes = (~(input_node_mask | output_node_mask)).nonzero(as_tuple=True)[0]
         self.residual = residual
+        self.channels = channels
 
         E = edge_index.size(1)
         N = torch.unique(edge_index.view(-1)).size(0)
@@ -22,37 +23,47 @@ class GSNN(torch.nn.Module):
         self.lin1 = SparseLinear(indices=utils.get_W1_indices(edge_index, channels), size=(E,channels*N), d=channels)
         self.lin2 = SparseLinear(indices=utils.get_W2_indices(function_nodes, channels), size=(channels*N, channels*N), d=channels)
         self.lin3 = SparseLinear(indices=utils.get_W3_indices(edge_index, function_nodes, channels), size=(channels*N, E), d=1)
-        self.norm1 = torch.nn.BatchNorm1d(channels*N)
-        self.norm2 = torch.nn.BatchNorm1d(channels*N)
+        self.norms = torch.nn.ModuleList([torch.nn.BatchNorm1d(1) for i in range(self.layers)])
 
         self.nonlin = nonlin() 
 
-        self.alpha = torch.nn.Parameter(torch.tensor([[[0.]]]))
+    def edge_update(self, x, x0, x_last, layer): 
+
+        # edge update 
+        x = self.lin1(x)
+        x = self.nonlin(x)
+        x = self.lin2(x)
+        x = self.nonlin(x)
+        x = self.lin3(x) 
+
+        # NOTE: we don't want to scale the input edges (e.g., drug concs),
+        # therefore we have to do this before adding residual layers
+        # the drug concs will be primarily zero, and therefore will scale them abnormally large. 
+        x = self.norms[layer](x.view(-1,1)).view(x.size())
+        x = self.dropout(x)
+
+        if self.residual: 
+            x = x + x_last 
+            x_last = x
+        else: 
+            x = x + x0  
+        
+        return x, x_last
 
     def forward(self, x):
         '''
         Assumes x is `node` indexed 
         ''' 
-        alpha = torch.sigmoid(self.alpha)
+        #alpha = torch.sigmoid(self.alpha)
         # convert x from node-indexed to edge-indexed
         x0 = utils.node2edge(x, self.edge_index)
         x=x0
         if self.residual: x_last = x
         for l in range(self.layers): 
-            x = self.lin1(x)
-            x = self.norm1(x)
-            x = self.nonlin(x)
-            #x = self.dropout(x)
-            x = self.lin2(x)
-            x = self.norm2(x)
-            x = self.nonlin(x)
-            #x = self.dropout(x)
-            x = self.lin3(x) 
-            x = self.dropout(x) # dropout on edges ? or dropout on node channels?
-            x = x + x0 
-            if self.residual: 
-                x = (1-alpha)*x + alpha*x_last
-                x_last = x
+            x, x_last = self.edge_update(x, x0, x_last, l)
+
+        # scale by num layers 
+        x /= self.layers
 
         # convert x from edge-indexed to node-indexed
         return utils.edge2node(x, self.edge_index, self.output_node_mask)

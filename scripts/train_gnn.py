@@ -207,4 +207,4 @@ if __name__ == '__main__':
         print(f'Epoch: {epoch} || loss (train): {loss_train:.3f} || r2 (test): {r2_test:.2f} || r flat (test): {r_flat_test:.2f} || elapsed: {(time.time() - big_tic)/60:.2f} min')
 
     # add test results + hparams
-    logger.add_hparam_results(args=args, y=y.detach().cpu().numpy(), yhat=yhat.detach().cpu().numpy())
+    logger.add_hparam_results(args=args, y=y, yhat=yhat)

@@ -16,7 +16,12 @@ def VC2HotEnc(x):
 
     return list(y)
 
-def load_mut(path, extpath): 
+def load_mut(path, extpath, include_variants=None): 
+    '''
+    loads CCLE mutation data and returns if a gene has any mutation (0=no, 1 is true.)
+
+    variant types = 'damaging', 'other non-conserving', 'silent', 'other conserving
+    '''
 
     mut = pd.read_csv(f'{path}/ccle_mutation.txt', sep=',', low_memory=False)
     dep2iname = utils.get_dep2iname(path).set_index('DepMap_ID').to_dict()['cell_iname']
@@ -25,6 +30,9 @@ def load_mut(path, extpath):
     mut = mut[lambda x: ~x.cell_iname.isna()]
 
     mut = mut[['Hugo_Symbol', 'cell_iname', 'Variant_annotation']]
+
+    if include_variants is not None: 
+        mut = mut[lambda x: x.Variant_annotation.isin(include_variants)]
 
     uni2symb = pd.read_csv(f'{extpath}/omnipath_uniprot2genesymb.tsv', sep='\t')
 
@@ -36,10 +44,10 @@ def load_mut(path, extpath):
 
     mut = mut.reset_index()
 
-    mut = mut.pivot(index='cell_iname', columns='uniprot', values='Variant_annotation')
+    mut = mut.assign(has_mut=1.)
 
-    mut = mut.fillna('NA')
+    mut = mut.pivot(index='cell_iname', columns='uniprot', values='has_mut')
 
-    mut = mut.applymap(VC2HotEnc)
+    mut = mut.fillna(0)
 
     return mut

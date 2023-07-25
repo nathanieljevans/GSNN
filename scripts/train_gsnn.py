@@ -40,6 +40,9 @@ def get_args():
     parser.add_argument("--ignore_cuda", action='store_true',
                         help="whether to ignore available cuda GPU")
     
+    parser.add_argument("--cell_agnostic", action='store_true',
+                        help="if true, will set all non-drug input nodes to zero, removing all contextual information")
+    
     parser.add_argument("--channels", type=int, default=5,
                         help="number of channels for each function node")
     
@@ -133,6 +136,11 @@ if __name__ == '__main__':
     scheduler = utils.get_scheduler(optim, args, train_loader)
     logger = utils.TBLogger(out_dir + '/tb/')
 
+    if args.cell_agnostic: 
+        # get indices of all non-drug input nodes 
+        omic_input_idxs = (data.input_node_mask & torch.tensor(['DRUG_' not in x for x in data.node_names], dtype=torch.bool)).nonzero(as_tuple=True)[0]
+        
+
     for epoch in range(args.epochs):
         big_tic = time.time()
         model = model.train()
@@ -142,6 +150,9 @@ if __name__ == '__main__':
             if len(sig_id) == 1: 
                 # BUG: if batch only has 1 obs it fails
                 continue 
+
+            if args.cell_agnostic: 
+                x[:, omic_input_idxs] = 0.
 
             tic = time.time()
             optim.zero_grad() 
