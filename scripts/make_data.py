@@ -62,10 +62,10 @@ def get_args():
     parser.add_argument("--min_obs_per_cell", type=int, default=10,
                         help="cell line inclusion criteria, must have at least X observations")
 
-    parser.add_argument("--test_prop", type=float, default=0.2,
+    parser.add_argument("--test_prop", type=float, default=0.15,
                         help="proportion of cell lines to hold-out for the test set")
     
-    parser.add_argument("--val_prop", type=float, default=0.,
+    parser.add_argument("--val_prop", type=float, default=0.15,
                         help="proportion of cell lines to hold-out for the validation set")
     
     parser.add_argument('--pathways', nargs='+', default=['R-HSA-9006934'],
