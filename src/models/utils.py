@@ -4,6 +4,10 @@ import numpy as np
 import os
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.metrics import r2_score
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+from sklearn.preprocessing import LabelBinarizer
 
 class TBLogger():
     def __init__(self, root):
@@ -11,12 +15,30 @@ class TBLogger():
         if not os.path.exists(root): os.mkdir(root)
         self.writer = SummaryWriter(log_dir = root)
 
-    def add_hparam_results(self, args, y, yhat):
+    def add_hparam_results(self, args, y, yhat, sig_ids, siginfo):
+
+        try: 
+            r_cell = get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
+        except: 
+            r_cell = -666
+        try:
+            r_drug = get_regressed_r(y, yhat, sig_ids, vars=['cell_iname', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
+        except: 
+            r_drug = -666
+        try: 
+            r_dose = get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'cell_iname'], multioutput='uniform_weighted', siginfo=siginfo)
+        except: 
+            r_dose = -666
 
         hparam_dict = args.__dict__
         metric_dict = {'R2':r2_score(y, yhat, multioutput='variance_weighted'), 
                        'r_flat': np.corrcoef(y.ravel(), yhat.ravel())[0,1],
-                       'MSE': np.mean((y - yhat)**2)}
+                       'MSE': np.mean((y - yhat)**2),
+                       'r_cell':r_cell, 
+                       'r_drug':r_drug,
+                       'r_dose':r_dose}
+        
+
         self.writer.add_hparams(hparam_dict, metric_dict)
 
     def log(self, epoch, train_loss, test_r2, test_r_flat):
@@ -195,8 +217,8 @@ def predict_gsnn(loader, model, data, device):
             yhats.append(yhat)
             sig_ids += sig_id
 
-    y = torch.cat(ys, dim=0)
-    yhat = torch.cat(yhats, dim=0)
+    y = torch.cat(ys, dim=0).detach().cpu().numpy()
+    yhat = torch.cat(yhats, dim=0).detach().cpu().numpy()
 
     return y, yhat, sig_ids
 
@@ -223,8 +245,8 @@ def predict_nn(loader, model, data, device):
             yhats.append(yhat)
             sig_ids += sig_id
 
-    y = torch.cat(ys, dim=0)
-    yhat = torch.cat(yhats, dim=0)
+    y = torch.cat(ys, dim=0).detach().cpu().numpy()
+    yhat = torch.cat(yhats, dim=0).detach().cpu().numpy()
 
     return y, yhat, sig_ids
 
@@ -282,3 +304,72 @@ def randomize(data):
     edge_index[:, data.output_edge_mask] = torch.stack((src, dst), dim=0)
 
     return edge_index
+
+
+
+def corr_score(y, yhat, multioutput='uniform_weighted'): 
+    '''
+    calculate the average pearson correlation score
+
+    y (n_samples, n_outputs): 
+    yhat (n_samples, n_outputs):
+    '''
+
+    corrs = []
+    for i in range(y.shape[1]): 
+        if (np.std(y[:, i]) == 0) : 
+            # this occurs when a landmark gene zscore will be all zeros for a batch. 
+            p = 0
+        
+        elif (np.std(yhat[:, i]) == 0): 
+            # this occurs if an entire batch is made up of the same replicate; can occur in test sets 
+            p = 0
+
+        else: 
+            p = np.corrcoef(y[:, i], yhat[:, i])[0,1]
+            
+        corrs.append( p ) 
+
+    if multioutput == 'uniform_weighted': 
+        return np.nanmean(corrs)
+    elif multioutput == 'raw_values': 
+        return corrs
+    else:
+        raise ValueError('unrecognized multioutput value, expected one of "uniform_weighted", "raw_values"')
+
+def regress_out(y, df, vars): 
+    '''
+    regress out variance from certain variables 
+
+    inputs 
+        y       numpy array     signal to modify 
+        df      dataframe       co-variates options 
+        vars    list<str>       variables to regress out; must be columns in dataframe 
+
+    outputs 
+        numpy array     augmented y signal 
+    ''' 
+    str_vars = df[vars].astype(str).agg('__'.join, axis=1)
+
+    lb = LabelBinarizer() 
+    one_hot_vars = lb.fit_transform(str_vars)
+
+    reg = LinearRegression() 
+    reg.fit(one_hot_vars, y)
+
+    y_vars = reg.predict(one_hot_vars)
+    y_res = y - y_vars
+
+    return y_res 
+
+def get_regressed_r(y, yhat, sig_ids, vars, data='../../data/', multioutput='uniform_weighted', siginfo=None): 
+
+    
+    if siginfo is None: siginfo = pd.read_csv(f'{data}/siginfo_beta.txt', sep='\t', low_memory=False)[['sig_id', 'pert_id', 'cell_iname', 'pert_dose']]
+
+    df = pd.DataFrame({'sig_id':sig_ids}).merge(siginfo, on='sig_id', how='left')
+
+    y_res = regress_out(y, df, vars=vars)
+    yhat_res = regress_out(yhat, df, vars=vars)
+
+    return corr_score(y_res, yhat_res, multioutput=multioutput)

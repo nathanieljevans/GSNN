@@ -6,6 +6,7 @@ import time
 import numpy as np 
 from torch.utils.data import DataLoader
 from sklearn.metrics import r2_score
+import pandas as pd 
 
 import sys 
 sys.path.append('../.')
@@ -18,6 +19,9 @@ def get_args():
 
     parser.add_argument("--data", type=str, default='../processed_data/',
                         help="path to data directory")
+    
+    parser.add_argument("--siginfo", type=str, default='../../data/',
+                        help="path to siginfo directory")
     
     parser.add_argument("--out", type=str, default='../output/',
                         help="path to output directory")
@@ -140,6 +144,7 @@ if __name__ == '__main__':
         # get indices of all non-drug input nodes 
         omic_input_idxs = (data.input_node_mask & torch.tensor(['DRUG_' not in x for x in data.node_names], dtype=torch.bool)).nonzero(as_tuple=True)[0]
         
+    siginfo = pd.read_csv(f'{args.siginfo}/siginfo_beta.txt', sep='\t', low_memory=False)
 
     for epoch in range(args.epochs):
         big_tic = time.time()
@@ -180,13 +185,25 @@ if __name__ == '__main__':
         loss_train = np.mean(losses)
 
         y,yhat,sig_ids = utils.predict_gsnn(test_loader, model, data, device)
+        try: 
+            r_cell = utils.get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
+        except: 
+            r_cell = -666
+        try:
+            r_drug = utils.get_regressed_r(y, yhat, sig_ids, vars=['cell_iname', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
+        except: 
+            r_drug = -666
+        try: 
+            r_dose = utils.get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'cell_iname'], multioutput='uniform_weighted', siginfo=siginfo)
+        except: 
+            r_dose = -666
         r2_test = r2_score(y, yhat, multioutput='variance_weighted')
         r_flat_test = np.corrcoef(y.ravel(), yhat.ravel())[0,1]
 
         logger.log(epoch, loss_train, r2_test, r_flat_test)
         torch.save(model, out_dir + '/model.pt')
 
-        print(f'Epoch: {epoch} || loss (train): {loss_train:.3f} || r2 (test): {r2_test:.2f} || r flat (test): {r_flat_test:.2f} || elapsed: {(time.time() - big_tic)/60:.2f} min')
+        print(f'Epoch: {epoch} || loss (train): {loss_train:.3f} || r2 (test): {r2_test:.2f} || r flat (test): {r_flat_test:.2f} || r cell: {r_cell:.2f} || r drug: {r_drug:.2f} || elapsed: {(time.time() - big_tic)/60:.2f} min')
 
     # add test results + hparams
-    logger.add_hparam_results(args=args, y=y.detach().cpu().numpy(), yhat=yhat.detach().cpu().numpy())
+    logger.add_hparam_results(args=args, y=y, yhat=yhat, sig_ids=sig_ids, siginfo=siginfo)

@@ -6,6 +6,7 @@ import time
 import numpy as np 
 from sklearn.metrics import r2_score
 import torch_geometric as pyg 
+import pandas as pd 
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -23,6 +24,9 @@ def get_args():
 
     parser.add_argument("--data", type=str, default='../processed_data/',
                         help="path to data directory")
+    
+    parser.add_argument("--siginfo", type=str, default='../../data/',
+                        help="path to siginfo directory")
     
     parser.add_argument("--out", type=str, default='../output/',
                         help="path to output directory")
@@ -157,6 +161,8 @@ if __name__ == '__main__':
     scheduler = utils.get_scheduler(optim, args, train_loader)
     logger = utils.TBLogger(out_dir + '/tb/')
 
+    siginfo = pd.read_csv(f'{args.siginfo}/siginfo_beta.txt', sep='\t', low_memory=False)
+
     for epoch in range(args.epochs):
         big_tic = time.time()
         model = model.train()
@@ -188,7 +194,18 @@ if __name__ == '__main__':
 
                 yhat = yhat.view(B, -1).detach().cpu().numpy() 
                 y = y.view(B, -1).detach().cpu().numpy() 
-                
+                try: 
+                    r_cell = utils.get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
+                except: 
+                    r_cell = -666
+                try:
+                    r_drug = utils.get_regressed_r(y, yhat, sig_ids, vars=['cell_iname', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
+                except: 
+                    r_drug = -666
+                try: 
+                    r_dose = utils.get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'cell_iname'], multioutput='uniform_weighted', siginfo=siginfo)
+                except: 
+                    r_dose = -666
                 r2 = r2_score(y, yhat, multioutput='variance_weighted')
                 r_flat = np.corrcoef(y.ravel(), yhat.ravel())[0,1]
                 losses.append(loss.item())
@@ -204,7 +221,7 @@ if __name__ == '__main__':
         logger.log(epoch, loss_train, r2_test, r_flat_test)
         torch.save(model, out_dir + '/model.pt')
 
-        print(f'Epoch: {epoch} || loss (train): {loss_train:.3f} || r2 (test): {r2_test:.2f} || r flat (test): {r_flat_test:.2f} || elapsed: {(time.time() - big_tic)/60:.2f} min')
+        print(f'Epoch: {epoch} || loss (train): {loss_train:.3f} || r2 (test): {r2_test:.2f} || r flat (test): {r_flat_test:.2f} || r cell: {r_cell:.2f} || r drug: {r_drug:.2f} || elapsed: {(time.time() - big_tic)/60:.2f} min')
 
     # add test results + hparams
-    logger.add_hparam_results(args=args, y=y, yhat=yhat)
+    logger.add_hparam_results(args=args, y=y, yhat=yhat, sig_ids=sig_ids, siginfo=siginfo)
