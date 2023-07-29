@@ -83,6 +83,8 @@ def get_args():
 
 if __name__ == '__main__': 
 
+    time0 = time.time() 
+
     # get args 
     args = get_args()
     args.model = 'gsnn'
@@ -117,7 +119,11 @@ if __name__ == '__main__':
 
     test_ids = np.load(f'{args.data}/test_obs.npy', allow_pickle=True)
     test_dataset = LincsDataset(root=f'{args.data}', sig_ids=test_ids)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=False)
+
+    val_ids = np.load(f'{args.data}/val_obs.npy', allow_pickle=True)
+    val_dataset = LincsDataset(root=f'{args.data}', sig_ids=val_ids)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=False)
 
     if args.randomize: data.edge_index = utils.randomize(data)
 
@@ -185,18 +191,7 @@ if __name__ == '__main__':
         loss_train = np.mean(losses)
 
         y,yhat,sig_ids = utils.predict_gsnn(test_loader, model, data, device)
-        try: 
-            r_cell = utils.get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
-        except: 
-            r_cell = -666
-        try:
-            r_drug = utils.get_regressed_r(y, yhat, sig_ids, vars=['cell_iname', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
-        except: 
-            r_drug = -666
-        try: 
-            r_dose = utils.get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'cell_iname'], multioutput='uniform_weighted', siginfo=siginfo)
-        except: 
-            r_dose = -666
+        r_cell, r_drug, r_dose = utils._get_regressed_metrics(y, yhat, sig_ids, siginfo)
         r2_test = r2_score(y, yhat, multioutput='variance_weighted')
         r_flat_test = np.corrcoef(y.ravel(), yhat.ravel())[0,1]
 
@@ -205,5 +200,13 @@ if __name__ == '__main__':
 
         print(f'Epoch: {epoch} || loss (train): {loss_train:.3f} || r2 (test): {r2_test:.2f} || r flat (test): {r_flat_test:.2f} || r cell: {r_cell:.2f} || r drug: {r_drug:.2f} || elapsed: {(time.time() - big_tic)/60:.2f} min')
 
+    time_elapsed = time.time() - time0
     # add test results + hparams
-    logger.add_hparam_results(args=args, y=y, yhat=yhat, sig_ids=sig_ids, siginfo=siginfo)
+    logger.add_hparam_results(args=args, 
+                              model=model, 
+                              data=data, 
+                              device=device, 
+                              test_loader=test_loader, 
+                              val_loader=val_loader, 
+                              siginfo=siginfo,
+                              time_elapsed=time_elapsed)

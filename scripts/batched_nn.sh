@@ -5,7 +5,7 @@
 jobid=0
 for lr in 0.1 0.01, 0.001; do
     for do in 0.0 0.25 0.5; do 
-        for c in 32 64 128; do
+        for c in 64 128 256; do
 
 jobid=$jobid+1
 

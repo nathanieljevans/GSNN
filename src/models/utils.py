@@ -9,34 +9,68 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import LabelBinarizer
 
+def _get_regressed_metrics(y, yhat, sig_ids, siginfo): 
+    try: 
+        r_cell = get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
+    except: 
+        r_cell = -666
+    try:
+        r_drug = get_regressed_r(y, yhat, sig_ids, vars=['cell_iname', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
+    except: 
+        r_drug = -666
+    try: 
+        r_dose = get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'cell_iname'], multioutput='uniform_weighted', siginfo=siginfo)
+    except: 
+        r_dose = -666
+    return r_cell, r_drug, r_dose
+
 class TBLogger():
     def __init__(self, root):
         ''''''
         if not os.path.exists(root): os.mkdir(root)
         self.writer = SummaryWriter(log_dir = root)
 
-    def add_hparam_results(self, args, y, yhat, sig_ids, siginfo):
+    def add_hparam_results(self, args, model, data, device, test_loader, val_loader, siginfo, time_elapsed):
 
-        try: 
-            r_cell = get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
-        except: 
-            r_cell = -666
-        try:
-            r_drug = get_regressed_r(y, yhat, sig_ids, vars=['cell_iname', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
-        except: 
-            r_drug = -666
-        try: 
-            r_dose = get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'cell_iname'], multioutput='uniform_weighted', siginfo=siginfo)
-        except: 
-            r_dose = -666
+        if args.model == 'nn':
+            predict_fn = predict_nn 
+        elif args.model == 'gsnn': 
+            predict_fn = predict_gsnn
+        elif args.model == 'gnn':
+            predict_fn = predict_gnn 
+        else: 
+            raise ValueError(f'unrecognized model type: {args.model}')
+        
+        y_test, yhat_test, sig_ids_test = predict_fn(test_loader, model, data, device)
+        y_val, yhat_val, sig_ids_val = predict_fn(val_loader, model, data, device)
+
+        r_cell_test, r_drug_test, r_dose_test = _get_regressed_metrics(y_test, yhat_test, sig_ids_test, siginfo)
+        r_cell_val, r_drug_val, r_dose_val = _get_regressed_metrics(y_val, yhat_val, sig_ids_val, siginfo)
+
+        r2_test = r2_score(y_test, yhat_test, multioutput='variance_weighted')
+        r2_val = r2_score(y_val, yhat_val, multioutput='variance_weighted')
+
+        r_flat_test = np.corrcoef(y_test.ravel(), yhat_test.ravel())[0,1]
+        r_flat_val = np.corrcoef(y_val.ravel(), yhat_val.ravel())[0,1]
+
+        mse_test = np.mean((y_test - yhat_test)**2)
+        mse_val = np.mean((y_val - yhat_val)**2)
 
         hparam_dict = args.__dict__
-        metric_dict = {'R2':r2_score(y, yhat, multioutput='variance_weighted'), 
-                       'r_flat': np.corrcoef(y.ravel(), yhat.ravel())[0,1],
-                       'MSE': np.mean((y - yhat)**2),
-                       'r_cell':r_cell, 
-                       'r_drug':r_drug,
-                       'r_dose':r_dose}
+        metric_dict = {'r2_test':r2_test, 
+                       'r2_val':r2_val, 
+                       'r_flat_test':r_flat_test, 
+                       'r_flat_val':r_flat_val,
+                       'r_cell_test':r_cell_test,
+                       'r_cell_val':r_cell_val,
+                       'r_drug_test':r_drug_test,
+                       'r_drug_val':r_drug_val,
+                       'r_dose_test':r_dose_test,
+                       'r_dose_val':r_dose_val,
+                       'mse_test':mse_test,
+                       'mse_val':mse_val,
+                       'time_elapsed':time_elapsed
+                       }
         
 
         self.writer.add_hparams(hparam_dict, metric_dict)
