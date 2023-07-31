@@ -94,7 +94,8 @@ if __name__ == '__main__':
     print()
 
     # create uuid 
-    uid = uuid.uuid4() 
+    uid = str(uuid.uuid4())
+    args.uid = uid
     print('UID:', uid)
     out_dir = f'{args.out}/{uid}'
     if not os.path.exists(args.out): 
@@ -108,7 +109,7 @@ if __name__ == '__main__':
         device = 'cuda'
     else: 
         device = 'cpu'
-
+    args.device = device
     print('using device:', device)
 
     data = torch.load(f'{args.data}/Data.pt')
@@ -139,6 +140,7 @@ if __name__ == '__main__':
              nonlin=utils.get_activation(args.nonlin)).to(device)
     
     n_params = sum([p.numel() for p in model.parameters()])
+    args.n_params = n_params
     print('# params', n_params)
 
     optim = utils.get_optim(args.optim)(model.parameters(), lr=args.lr, weight_decay=args.wd)

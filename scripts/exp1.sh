@@ -1,4 +1,14 @@
-#!/bin/sh 
+#!/bin/zsh 
+
+
+#SBATCH --job-name=exp1
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=12
+#SBATCH --time=4:00:00
+#SBATCH --mem=32G
+#SBATCH --output=EXP1.%j.out
+#SBATCH --error=EXP1.%j.err
+
 
 #
 # EGFR Signaling 
@@ -7,37 +17,34 @@
 # extended GRN: No 
 #
 
-
-# python make_data.py --data ../../data/ --out ../output/exp1/proc/ --pathways R-HSA-177929 --feature_space landmark --targetome_targets 
-# python train_gsnn.py --data ../output/exp1/proc/ --out ../output/exp1/ --dropout 0.33 --channels 4 --layers 10 --lr 1e-1 --epochs 100
-# python train_nn.py --data ../output/exp1/proc/ --out ../output/exp1/ --dropout 0.33 --channels 64 --lr 1e-3 --epochs 100
-
-
+########## PARAMS #########
 PATHWAY=R-HSA-177929
 DATA=../../data/
-OUT=../output/exp1/
+OUT=../output/exp1-1/
 PROC=$OUT/proc/
 EPOCHS=100
+##########################
 
+echo 'removing out dir and making proc dir...'
 rm -r $OUT
 mkdir $OUT 
 mkdir $PROC
 
+echo 'making data...' 
+source ~/.zshrc
 conda activate gsnn 
-python make_data.py --data $DATA --out $PROC --pathways $PATHWAY --feature_space landmark --targetome_targets 
+python make_data.py --data $DATA --out $PROC --pathways $PATHWAY --feature_space landmark --targetome_targets >> $PROC/make_data.out
 
 echo 'submitting gsnn jobs...'
-sbatch batched_gsnn.sh $PROC $OUT $EPOCHS
+mkdir $OUT/GSNN/
+./batched_gsnn.sh $PROC $OUT/GSNN/ $EPOCHS
 
 echo 'submitting nn jobs...'
-sbatch batched_nn.sh $PROC $OUT $EPOCHS
+mkdir $OUT/NN/
+./batched_nn.sh $PROC $OUT/NN/ $EPOCHS
 
 echo 'submitting gnn jobs...'
-sbatch batched_gnn.sh $PROC $OUT $EPOCHS
+mkdir $OUT/GNN/
+./batched_gnn.sh $PROC $OUT/GNN/ $EPOCHS
 
-#python train_gsnn.py --data $PROC --out $OUT --dropout $DO --channels 4 --layers 10 --lr $LR --clip_grad $CG --epochs $EPOCHS
-#python train_gsnn.py --data $PROC --out $OUT --dropout $DO --channels 4 --layers 10 --lr $LR --clip_grad $CG --randomize --epochs $EPOCHS
-#python train_nn.py --data $PROC --out $OUT --dropout $DO --channels 64 --lr $LR --clip_grad $CG --epochs $EPOCHS
-#python train_nn.py --data $PROC --out $OUT --dropout $DO --channels 64 --lr $LR --clip_grad $CG --cell_agnostic --epochs $EPOCHS
-#python train_gnn.py --data $PROC --out $OUT --dropout $DO --lr $LR --clip_grad $CG --epochs $EPOCHS
-#python train_gnn.py --data $PROC --out $OUT --dropout $DO --lr $LR --clip_grad $CG --epochs $EPOCHS --randomize
+
