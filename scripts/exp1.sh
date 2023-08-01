@@ -37,7 +37,8 @@ python make_data.py --data $DATA --out $PROC --pathways $PATHWAY --feature_space
 
 echo 'submitting gsnn jobs...'
 mkdir $OUT/GSNN/
-./batched_gsnn.sh $PROC $OUT/GSNN/ $EPOCHS
+# 					                   TIME     MEM BTCH    GPU
+./batched_gsnn.sh ./batched_nn.sh $PROC $OUT/GSNN/ $EPOCHS 00:05:00 16G 100 gpu:rtx2080:1
 
 echo 'submitting nn jobs...'
 mkdir $OUT/NN/
