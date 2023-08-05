@@ -1,8 +1,18 @@
 #!/bin/zsh
 # example use:
-# sbatch batched_nn.sh $PROC $OUT $EPOCHS
+# ./batched_nn.sh $PROC $OUT $EPOCHS $TIME $MEM $BATCH 
+# ./batched_nn.sh ../output/exp1-1/proc/ ../output/nn_test/ 10 00:10:00 8G 256
 
-OUT2=$2/slurm_logs__NN/
+PROC=$1
+OUT=$2 
+EPOCHS=$3
+TIME=$4 
+MEM=$5
+BATCH=$6
+
+mkdir $OUT
+
+OUT2=$OUT/slurm_logs__NN/
 if [ -d "$OUT2" ]; then
         echo "slurm output log dir exists. Erasing contents..."
         rm -r "$OUT2"/*
@@ -12,9 +22,9 @@ else
 fi
 
 jobid=0
-for lr in 0.1 0.01 0.001; do
-    for do in 0.0 0.25 0.5; do 
-        for c in 64 128 256; do
+for lr in 0.01 0.001; do
+    for do in 0 0.25 0.5; do 
+        for c in 32 64 124; do
 
 jobid=$((jobid+1))
 
@@ -26,16 +36,16 @@ sbatch <<EOF
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
-#SBATCH --time=01:00:00
-#SBATCH --mem=8G
+#SBATCH --time=$TIME
+#SBATCH --mem=$MEM
 #SBATCH --output=$OUT2/log.%j.out
 #SBATCH --error=$OUT2/log.%j.err
 
 source ~/.zshrc
 conda activate gsnn 
 cd /home/exacloud/gscratch/NGSdev/evans/GSNN/scripts/
-python train_nn.py --data $1 --out $2 --dropout $do --channels $c --lr $lr --epochs $3
-python train_nn.py --data $1 --out $2 --dropout $do --channels $c --lr $lr --epochs $3 --cell_agnostic
+python train_nn.py --data $PROC --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH
+python train_nn.py --data $PROC --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --cell_agnostic
 
 EOF
 done

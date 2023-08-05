@@ -1,0 +1,15 @@
+/var/spool/slurmd/job22993698/slurm_script:22: command not found: R-HSA-157118
+rm: cannot remove ‘../output/exp5-1/’: No such file or directory
+usage: make_data.py [-h] [--data DATA] [--out OUT] [--exempl_sig_only]
+                    [--feature_space FEATURE_SPACE [FEATURE_SPACE ...]]
+                    [--stitch_targets] [--full_grn]
+                    [--min_drug_score MIN_DRUG_SCORE] [--targetome_targets]
+                    [--min_prop_downstream_lincs_per_drug MIN_PROP_DOWNSTREAM_LINCS_PER_DRUG]
+                    [--time TIME] [--min_obs_per_drug MIN_OBS_PER_DRUG]
+                    [--min_obs_per_cell MIN_OBS_PER_CELL]
+                    [--test_prop TEST_PROP] [--val_prop VAL_PROP]
+                    [--pathways PATHWAYS [PATHWAYS ...]]
+make_data.py: error: argument --pathways: expected at least one argument
+mkdir: cannot create directory ‘../output/exp5-1//GSNN/’: File exists
+mkdir: cannot create directory ‘../output/exp5-1//NN/’: File exists
+mkdir: cannot create directory ‘../output/exp5-1//GNN/’: File exists

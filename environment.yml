@@ -13,13 +13,14 @@ dependencies:
     - matplotlib
     - pubchempy
     - pyg
-    - pytorch=2.0
-    - torchvision
-    - torchaudio
+    - pytorch::pytorch=2.0
+    - pytorch::torchvision
+    - pytorch::torchaudio
     - pytorch-cuda=11.7
     - seaborn
     - scikit-learn
     - h5py
+    - scipy
     - tensorboard
     - shapely
     - statsmodels
@@ -27,6 +28,7 @@ dependencies:
     - rdkit
     - shap
     - pip:
+        - tensorboardX
         - ipykernel
         - umap-learn
         - biopython

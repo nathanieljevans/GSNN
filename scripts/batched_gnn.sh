@@ -1,9 +1,21 @@
 #!/bin/zsh
 # example use:
-# sbatch batched_nn.sh $PROC $OUT $EPOCHS
+# ./batched_gnn.sh $PROC $OUT $EPOCHS $TIME $MEM $GPU $BATCH 
+# ./batched_gnn.sh ../output/exp1-1/proc/ ../output/gnn_test/ 10 00:30:00 12G gpu:1 50
+  
+
+PROC=$1 
+OUT=$2
+EPOCHS=$3
+TIME=$4
+MEM=$5
+GPU=$6
+BATCH=$7
+
+mkdir $OUT
 
 # make slurm log dir
-OUT2=$2/slurm_logs__GNN/
+OUT2=$OUT/slurm_logs__GNN/
 if [ -d "$OUT2" ]; then
 	echo "slurm output log dir exists. Erasing contents..."
         rm -r "$OUT2"/*
@@ -13,10 +25,10 @@ else
 fi
 
 jobid=0
-for lr in 0.01 0.001; do
-    for do in 0.0 0.25; do 
+for lr in 0.001; do
+    for do in 0 0.25; do 
         for c in 32 64; do
-            for conv in GCN GAT GIN; do
+            for conv in GCN GIN GAT; do
 
 
 jobid=$((jobid+1))
@@ -29,19 +41,21 @@ sbatch <<EOF
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
-#SBATCH --time=04:00:00
-#SBATCH --mem=16G
+#SBATCH --gres=$GPU
+#SBATCH --time=$TIME
+#SBATCH --mem=$MEM
+#SBATCH --partition=gpu
 #SBATCH --output=$OUT2/log.%j.out
 #SBATCH --error=$OUT2/log.%j.err
 
 source ~/.zshrc
 conda activate gsnn 
 cd /home/exacloud/gscratch/NGSdev/evans/GSNN/scripts/
-python train_gnn.py --data $1 --out $2 --dropout $do --channels $c --lr $lr --epochs $3 --gnn $conv
-python train_gnn.py --data $1 --out $2 --dropout $do --channels $c --lr $lr --epochs $3 --gnn $conv --randomize
+python train_gnn.py --data $PROC --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --gnn $conv --batch $BATCH
+python train_gnn.py --data $PROC --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --gnn $conv --batch $BATCH --randomize
 
 EOF
 done
 done
 done
-done
+done 

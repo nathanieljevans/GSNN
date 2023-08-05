@@ -1,0 +1,14 @@
+name: gsnn_tf 
+
+channels: 
+        - defaults 
+        - conda-forge
+
+dependencies: 
+        - python>3.0 
+        - tensorflow 
+        - numpy 
+        - pandas 
+        - glob2
+        - pip: 
+                - tbparse

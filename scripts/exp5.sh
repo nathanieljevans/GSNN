@@ -1,27 +1,27 @@
 #!/bin/zsh 
 # example use: 
-###     $ sbatch exp1.sh
+###     $ sbatch exp5.sh
 
-#SBATCH --job-name=exp1
+#SBATCH --job-name=exp5
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --time=4:00:00
 #SBATCH --mem=32G
-#SBATCH --output=./SLURM_OUT/EXP1.%j.out
-#SBATCH --error=./SLURM_OUT/EXP1.%j.err
+#SBATCH --output=./SLURM_OUT/EXP5.%j.out
+#SBATCH --error=./SLURM_OUT/EXP5.%j.err
 
 
 #
-# EGFR Signaling 
+# Signaling by NOTCH
 # LINCS SPACE: landmark 
-# Drug Targets: CLUE + Targetome
+# Drug Targets: CLUE + Targetome 
 # extended GRN: No 
 #
 
 ########## PARAMS #########
-PATHWAY=R-HSA-177929
+PATHWAY=R-HSA-157118
 DATA=../../data/
-OUT=../output/exp1-2/
+OUT=../output/exp5-1/
 PROC=$OUT/proc/
 EPOCHS=100
 ##########################
@@ -38,17 +38,17 @@ python make_data.py --data $DATA --out $PROC --pathways $PATHWAY --feature_space
 
 echo 'submitting gsnn jobs...'
 mkdir $OUT/GSNN/
-#                                          HH:MM:SS MEM BTCH GRES        
-./batched_gsnn.sh $PROC $OUT/GSNN/ $EPOCHS 03:00:00 12G 50 gpu:1 
+#                                          D-HH:MM:SS MEM BTCH GRES        
+./batched_gsnn.sh $PROC $OUT/GSNN/ $EPOCHS 1-12:00:00 16G 100 gpu:1 
 
 echo 'submitting nn jobs...'
 mkdir $OUT/NN/
 #                                      HH:MM:SS MEM BTCH
-./batched_nn.sh $PROC $OUT/NN/ $EPOCHS 02:00:00 12G 256
+./batched_nn.sh $PROC $OUT/NN/ $EPOCHS 04:00:00 12G 256
 
 echo 'submitting gnn jobs...'
 mkdir $OUT/GNN/
 #                                        HH:MM:SS MEM GRES  BTCH
-./batched_gnn.sh $PROC $OUT/GNN/ $EPOCHS 03:00:00 12G gpu:1 50
+./batched_gnn.sh $PROC $OUT/GNN/ $EPOCHS 12:00:00 12G gpu:1 50
 
 

@@ -1,22 +1,25 @@
 #!/bin/zsh
 # example use:
-# ./batched_nn.sh $PROC $OUT $EPOCHS $TIME $MEM $BATCH $GPU
+# ./batched_gsnn.sh $PROC $OUT $EPOCHS $TIME $MEM $BATCH $GPU
+# ./batched_gsnn.sh ../output/exp1-1/proc/ ../output/gpu_test/ 10 00:10:00 8G 50 gpu:rtx2080:1 
 
-PROC=$2   # path to processed data directory 
-OUT=$3    # path to output directory 
-EPOCHS=$4 # number of training epochs to run 
-TIME=$5   # amount of time to request for the slurm job (hours); up to 24; must be in format HH:MM:SS, e.g., 01:00:00 -> 1 hour 
-MEM=$6    # amount of memory to request for the slurm job (GB); should be in format xG, e.g., 16G -> 16 GB 
-BATCH=$7  # batch size to use, smaller batches will use less memory, but may affect optimization results. 
-GPU=$8    # gpu to request for the slurm job; should be in format: #SBATCH "gpu:rtx2080:1" -> 1 rtx2080 GPU 
+PROC=$1   # path to processed data directory 
+OUT=$2    # path to output directory 
+EPOCHS=$3 # number of training epochs to run 
+TIME=$4   # amount of time to request for the slurm job (hours); e.g., 01:00:00 -> 1 hour 
+MEM=$5    # amount of memory to request for the slurm job (GB); should be in format xG, e.g., 16G -> 16 GB 
+BATCH=$6  # batch size to use, smaller batches will use less memory, but may affect optimization results. 
+GPU=$7    # gpu to request for the slurm job; should be in format: #SBATCH "gpu:rtx2080:1" -> 1 rtx2080 GPU 
 
-#echo "PROC=$PROC"
-#echo "OUT=$OUT" 
-#echo "EPOCHS=$EPOCHS" 
-#echo "TIME=$TIME"
-#echo "MEM=$MEM" 
-#echo "BATCH=$BATCH" 
-#echo "GPU=$GPU"
+mkdir $OUT
+
+echo "PROC=$PROC"
+echo "OUT=$OUT" 
+echo "EPOCHS=$EPOCHS" 
+echo "TIME=$TIME"
+echo "MEM=$MEM" 
+echo "BATCH=$BATCH" 
+echo "GPU=$GPU"
 
 # make slurm log dir 
 OUT2=$OUT/slurm_logs__GSNN/
@@ -30,16 +33,16 @@ fi
 
 jobid=0
 # HYPER-PARAMETER GRID SEARCH 
-for lr in 0.01; do
-    for do in 0.5; do 
-        for c in 2; do
+for lr in 0.05 0.005; do
+    for do in 0.25 0.5; do 
+        for c in 5 10; do
+	    for lay in 10 15; do
 
 jobid=$((jobid+1))
 
-echo "submitting job: nn (lr=$lr, do=$do, c=$c)"
+echo "submitting job: GSNN  (lr=$lr, do=$do, c=$c)"
 
 # SUBMIT SBATCH JOB 
-
 
 sbatch <<EOF
 #!/bin/bash
@@ -57,10 +60,11 @@ sbatch <<EOF
 source ~/.zshrc
 conda activate gsnn 
 cd /home/exacloud/gscratch/NGSdev/evans/GSNN/scripts/
-python train_gsnn.py --data $PROC --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH
-python train_gsnn.py --data $PROC --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --randomize
+python train_gsnn.py --data $PROC --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --layers $lay
+python train_gsnn.py --data $PROC --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --layers $lay --randomize
 
 EOF
+done
 done
 done
 done
