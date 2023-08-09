@@ -72,6 +72,9 @@ def get_args():
     parser.add_argument("--sched", type=str, default='none',
                         help="lr scheduler [onecycle, cosine, none]")
     
+    parser.add_argument("--save_every", type=int, default=5,
+                        help="saves model results and weights every X epochs")
+    
     return parser.parse_args()
     
 
@@ -145,7 +148,7 @@ if __name__ == '__main__':
 
     siginfo = pd.read_csv(f'{args.siginfo}/siginfo_beta.txt', sep='\t', low_memory=False)
 
-    for epoch in range(args.epochs):
+    for epoch in range(1, args.epochs+1):
         
         big_tic = time.time()
         model = model.train()
@@ -188,7 +191,22 @@ if __name__ == '__main__':
         r_flat_test = np.corrcoef(y.ravel(), yhat.ravel())[0,1]
 
         logger.log(epoch, loss_train, r2_test, r_flat_test)
-        torch.save(model, out_dir + '/model.pt')
+        
+        if (epoch % args.save_every == 0): 
+
+            time_elapsed = time.time() - time0
+            # add test results + hparams
+            logger.add_hparam_results(args=args, 
+                                    model=model, 
+                                    data=data, 
+                                    device=device, 
+                                    test_loader=test_loader, 
+                                    val_loader=val_loader, 
+                                    siginfo=siginfo,
+                                    time_elapsed=time_elapsed,
+                                    epoch=epoch)
+
+            torch.save(model, out_dir + f'/model-{epoch}.pt')
 
         print(f'Epoch: {epoch} || loss (train): {loss_train:.3f} || r2 (test): {r2_test:.2f} || r flat (test): {r_flat_test:.2f} || r cell: {r_cell:.2f} || r drug: {r_drug:.2f} || elapsed: {(time.time() - big_tic)/60:.2f} min')
 

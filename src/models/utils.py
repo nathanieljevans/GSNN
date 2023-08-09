@@ -30,7 +30,7 @@ class TBLogger():
         if not os.path.exists(root): os.mkdir(root)
         self.writer = SummaryWriter(log_dir = root)
 
-    def add_hparam_results(self, args, model, data, device, test_loader, val_loader, siginfo, time_elapsed):
+    def add_hparam_results(self, args, model, data, device, test_loader, val_loader, siginfo, time_elapsed, epoch):
 
         if args.model == 'nn':
             predict_fn = predict_nn 
@@ -69,7 +69,8 @@ class TBLogger():
                        'r_dose_val':r_dose_val,
                        'mse_test':mse_test,
                        'mse_val':mse_val,
-                       'time_elapsed':time_elapsed
+                       'time_elapsed':time_elapsed,
+                       'eval_at_epoch':epoch
                        }
         
 
