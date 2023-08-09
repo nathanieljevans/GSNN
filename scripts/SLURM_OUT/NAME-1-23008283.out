@@ -1,0 +1,107 @@
+removing out dir and making proc dir...
+making data...
+submitting gsnn jobs...
+PROC=../output/exp1-1//proc/
+OUT=../output/exp1-1//GSNN/
+EPOCHS=100
+TIME=03:00:00
+MEM=12G
+BATCH=50
+GPU=gpu:1
+slurm output log dir does not exist. Creating...
+submitting job: GSNN  (lr=0.05, do=0.25, c=5)
+Submitted batch job 23008435
+submitting job: GSNN  (lr=0.05, do=0.25, c=5)
+Submitted batch job 23008436
+submitting job: GSNN  (lr=0.05, do=0.25, c=10)
+Submitted batch job 23008437
+submitting job: GSNN  (lr=0.05, do=0.25, c=10)
+Submitted batch job 23008438
+submitting job: GSNN  (lr=0.05, do=0.5, c=5)
+Submitted batch job 23008439
+submitting job: GSNN  (lr=0.05, do=0.5, c=5)
+Submitted batch job 23008440
+submitting job: GSNN  (lr=0.05, do=0.5, c=10)
+Submitted batch job 23008441
+submitting job: GSNN  (lr=0.05, do=0.5, c=10)
+Submitted batch job 23008442
+submitting job: GSNN  (lr=0.005, do=0.25, c=5)
+Submitted batch job 23008443
+submitting job: GSNN  (lr=0.005, do=0.25, c=5)
+Submitted batch job 23008444
+submitting job: GSNN  (lr=0.005, do=0.25, c=10)
+Submitted batch job 23008445
+submitting job: GSNN  (lr=0.005, do=0.25, c=10)
+Submitted batch job 23008446
+submitting job: GSNN  (lr=0.005, do=0.5, c=5)
+Submitted batch job 23008447
+submitting job: GSNN  (lr=0.005, do=0.5, c=5)
+Submitted batch job 23008448
+submitting job: GSNN  (lr=0.005, do=0.5, c=10)
+Submitted batch job 23008449
+submitting job: GSNN  (lr=0.005, do=0.5, c=10)
+Submitted batch job 23008450
+submitting nn jobs...
+slurm output log dir does not exist. Creating...
+submitting job: nn (lr=0.01, do=0, c=32)
+Submitted batch job 23008451
+submitting job: nn (lr=0.01, do=0, c=64)
+Submitted batch job 23008452
+submitting job: nn (lr=0.01, do=0, c=124)
+Submitted batch job 23008453
+submitting job: nn (lr=0.01, do=0.25, c=32)
+Submitted batch job 23008454
+submitting job: nn (lr=0.01, do=0.25, c=64)
+Submitted batch job 23008455
+submitting job: nn (lr=0.01, do=0.25, c=124)
+Submitted batch job 23008456
+submitting job: nn (lr=0.01, do=0.5, c=32)
+Submitted batch job 23008457
+submitting job: nn (lr=0.01, do=0.5, c=64)
+Submitted batch job 23008458
+submitting job: nn (lr=0.01, do=0.5, c=124)
+Submitted batch job 23008459
+submitting job: nn (lr=0.001, do=0, c=32)
+Submitted batch job 23008460
+submitting job: nn (lr=0.001, do=0, c=64)
+Submitted batch job 23008461
+submitting job: nn (lr=0.001, do=0, c=124)
+Submitted batch job 23008462
+submitting job: nn (lr=0.001, do=0.25, c=32)
+Submitted batch job 23008463
+submitting job: nn (lr=0.001, do=0.25, c=64)
+Submitted batch job 23008464
+submitting job: nn (lr=0.001, do=0.25, c=124)
+Submitted batch job 23008465
+submitting job: nn (lr=0.001, do=0.5, c=32)
+Submitted batch job 23008466
+submitting job: nn (lr=0.001, do=0.5, c=64)
+Submitted batch job 23008467
+submitting job: nn (lr=0.001, do=0.5, c=124)
+Submitted batch job 23008468
+submitting gnn jobs...
+slurm output log dir does not exist. Creating...
+submitting job: nn (lr=0.001, do=0, c=32)
+Submitted batch job 23008469
+submitting job: nn (lr=0.001, do=0, c=32)
+Submitted batch job 23008470
+submitting job: nn (lr=0.001, do=0, c=32)
+Submitted batch job 23008471
+submitting job: nn (lr=0.001, do=0, c=64)
+Submitted batch job 23008472
+submitting job: nn (lr=0.001, do=0, c=64)
+Submitted batch job 23008473
+submitting job: nn (lr=0.001, do=0, c=64)
+Submitted batch job 23008474
+submitting job: nn (lr=0.001, do=0.25, c=32)
+Submitted batch job 23008475
+submitting job: nn (lr=0.001, do=0.25, c=32)
+Submitted batch job 23008476
+submitting job: nn (lr=0.001, do=0.25, c=32)
+Submitted batch job 23008477
+submitting job: nn (lr=0.001, do=0.25, c=64)
+Submitted batch job 23008478
+submitting job: nn (lr=0.001, do=0.25, c=64)
+Submitted batch job 23008479
+submitting job: nn (lr=0.001, do=0.25, c=64)
+Submitted batch job 23008480

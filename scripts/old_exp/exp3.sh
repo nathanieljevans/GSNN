@@ -1,27 +1,27 @@
 #!/bin/zsh 
 # example use: 
-###     $ sbatch exp8.sh
+###     $ sbatch exp1.sh
 
-#SBATCH --job-name=exp8
+#SBATCH --job-name=exp3
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=4:00:00
 #SBATCH --mem=32G
-#SBATCH --output=./SLURM_OUT/EXP8.%j.out
-#SBATCH --error=./SLURM_OUT/EXP8.%j.err
+#SBATCH --output=./SLURM_OUT/EXP3.%j.out
+#SBATCH --error=./SLURM_OUT/EXP3.%j.err
 
 
 #
-# Death Receptor Signaling
+# MAPK family signaling cascades
 # LINCS SPACE: landmark 
-# Drug Targets: CLUE + Targetome 
+# Drug Targets: CLUE + Targetome
 # extended GRN: No 
 #
 
 ########## PARAMS #########
-PATHWAY=R-HSA-73887
+PATHWAY=R-HSA-5683057
 DATA=../../data/
-OUT=../output/exp8-2/
+OUT=../output/exp3-1/
 PROC=$OUT/proc/
 EPOCHS=100
 ##########################

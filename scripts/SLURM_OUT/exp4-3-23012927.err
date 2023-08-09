@@ -1,0 +1,4 @@
+mkdir: cannot create directory '../output/exp4-3//GSNN/': File exists
+mkdir: cannot create directory '../output/exp4-3//GSNN/': File exists
+mkdir: cannot create directory '../output/exp4-3//NN/': File exists
+mkdir: cannot create directory '../output/exp4-3//GNN/': File exists

@@ -1,27 +1,27 @@
 #!/bin/zsh 
 # example use: 
-###     $ sbatch exp6.sh
+###     $ sbatch exp8.sh
 
-#SBATCH --job-name=exp6
+#SBATCH --job-name=exp8
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=4:00:00
 #SBATCH --mem=32G
-#SBATCH --output=./SLURM_OUT/EXP6.%j.out
-#SBATCH --error=./SLURM_OUT/EXP6.%j.err
+#SBATCH --output=./SLURM_OUT/EXP8.%j.out
+#SBATCH --error=./SLURM_OUT/EXP8.%j.err
 
 
 #
-# Signaling by GPCR
+# Death Receptor Signaling
 # LINCS SPACE: landmark 
 # Drug Targets: CLUE + Targetome 
 # extended GRN: No 
 #
 
 ########## PARAMS #########
-PATHWAY=R-HSA-372790
+PATHWAY=R-HSA-73887
 DATA=../../data/
-OUT=../output/exp6-1/
+OUT=../output/exp8-2/
 PROC=$OUT/proc/
 EPOCHS=100
 ##########################
@@ -39,7 +39,7 @@ python make_data.py --data $DATA --out $PROC --pathways $PATHWAY --feature_space
 echo 'submitting gsnn jobs...'
 mkdir $OUT/GSNN/
 #                                          D-HH:MM:SS MEM BTCH GRES        
-./batched_gsnn.sh $PROC $OUT/GSNN/ $EPOCHS 1-12:00:00 16G 100 gpu:1 
+./batched_gsnn.sh $PROC $OUT/GSNN/ $EPOCHS 1-12:00:00 16G 50 gpu:1 
 
 echo 'submitting nn jobs...'
 mkdir $OUT/NN/

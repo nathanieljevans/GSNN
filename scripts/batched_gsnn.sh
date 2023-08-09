@@ -34,7 +34,7 @@ fi
 jobid=0
 # HYPER-PARAMETER GRID SEARCH 
 for lr in 0.05 0.005; do
-    for do in 0.25 0.5; do 
+    for do in 0 0.25 0.5; do 
         for c in 5 10; do
 	    for lay in 10 15; do
 
