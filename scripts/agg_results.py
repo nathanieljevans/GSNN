@@ -7,7 +7,7 @@ import glob
 
 def get_results(root, exp): 
     reader = SummaryReader(root, pivot=True, extra_columns={'dir_name'})
-    scalars = reader.scalars[['r2_test', 'r2_val', 'r_cell_test', 'r_cell_val', 'r_drug_test', 'r_drug_val', 'r_dose_test', 'r_dose_val', 'mse_test', 'mse_val', 'r_flat_test', 'r_flat_val', 'time_elapsed', 'dir_name']].dropna().drop_duplicates()
+    scalars = reader.scalars[['r2_test', 'r2_val', 'r_cell_test', 'r_cell_val', 'r_drug_test', 'r_drug_val', 'r_dose_test', 'r_dose_val', 'mse_test', 'mse_val', 'r_flat_test', 'r_flat_val', 'time_elapsed', 'eval_at_epoch', 'dir_name']].dropna().drop_duplicates()
     hparams = reader.hparams.drop_duplicates()
 
     all_results = hparams.merge(scalars, on='dir_name', how='left')

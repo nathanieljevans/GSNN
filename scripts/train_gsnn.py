@@ -77,7 +77,7 @@ def get_args():
     parser.add_argument("--clip_grad", type=float, default=None,
                         help="gradient clipping by norm")
     
-    parser.add_argument("--save_every", type=int, default=5,
+    parser.add_argument("--save_every", type=int, default=20,
                         help="saves model results and weights every X epochs")
     
     return parser.parse_args()

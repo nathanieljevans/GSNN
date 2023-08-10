@@ -1,0 +1,123 @@
+removing out dir and making proc dir...
+making data...
+submitting gsnn jobs...
+PROC=../output/exp6-1//proc/
+OUT=../output/exp6-1//GSNN/
+EPOCHS=100
+TIME=03:00:00
+MEM=12G
+BATCH=50
+GPU=gpu:1
+slurm output log dir does not exist. Creating...
+submitting job: GSNN  (lr=0.05, do=0, c=5)
+Submitted batch job 23015921
+submitting job: GSNN  (lr=0.05, do=0, c=5)
+Submitted batch job 23015923
+submitting job: GSNN  (lr=0.05, do=0, c=10)
+Submitted batch job 23015925
+submitting job: GSNN  (lr=0.05, do=0, c=10)
+Submitted batch job 23015927
+submitting job: GSNN  (lr=0.05, do=0.25, c=5)
+Submitted batch job 23015928
+submitting job: GSNN  (lr=0.05, do=0.25, c=5)
+Submitted batch job 23015930
+submitting job: GSNN  (lr=0.05, do=0.25, c=10)
+Submitted batch job 23015932
+submitting job: GSNN  (lr=0.05, do=0.25, c=10)
+Submitted batch job 23015933
+submitting job: GSNN  (lr=0.05, do=0.5, c=5)
+Submitted batch job 23015935
+submitting job: GSNN  (lr=0.05, do=0.5, c=5)
+Submitted batch job 23015936
+submitting job: GSNN  (lr=0.05, do=0.5, c=10)
+Submitted batch job 23015938
+submitting job: GSNN  (lr=0.05, do=0.5, c=10)
+Submitted batch job 23015940
+submitting job: GSNN  (lr=0.005, do=0, c=5)
+Submitted batch job 23015942
+submitting job: GSNN  (lr=0.005, do=0, c=5)
+Submitted batch job 23015944
+submitting job: GSNN  (lr=0.005, do=0, c=10)
+Submitted batch job 23015945
+submitting job: GSNN  (lr=0.005, do=0, c=10)
+Submitted batch job 23015946
+submitting job: GSNN  (lr=0.005, do=0.25, c=5)
+Submitted batch job 23015947
+submitting job: GSNN  (lr=0.005, do=0.25, c=5)
+Submitted batch job 23015948
+submitting job: GSNN  (lr=0.005, do=0.25, c=10)
+Submitted batch job 23015949
+submitting job: GSNN  (lr=0.005, do=0.25, c=10)
+Submitted batch job 23015950
+submitting job: GSNN  (lr=0.005, do=0.5, c=5)
+Submitted batch job 23015951
+submitting job: GSNN  (lr=0.005, do=0.5, c=5)
+Submitted batch job 23015952
+submitting job: GSNN  (lr=0.005, do=0.5, c=10)
+Submitted batch job 23015953
+submitting job: GSNN  (lr=0.005, do=0.5, c=10)
+Submitted batch job 23015954
+submitting nn jobs...
+slurm output log dir does not exist. Creating...
+submitting job: nn (lr=0.01, do=0, c=32)
+Submitted batch job 23015955
+submitting job: nn (lr=0.01, do=0, c=64)
+Submitted batch job 23015956
+submitting job: nn (lr=0.01, do=0, c=124)
+Submitted batch job 23015957
+submitting job: nn (lr=0.01, do=0.25, c=32)
+Submitted batch job 23015958
+submitting job: nn (lr=0.01, do=0.25, c=64)
+Submitted batch job 23015959
+submitting job: nn (lr=0.01, do=0.25, c=124)
+Submitted batch job 23015960
+submitting job: nn (lr=0.01, do=0.5, c=32)
+Submitted batch job 23015961
+submitting job: nn (lr=0.01, do=0.5, c=64)
+Submitted batch job 23015962
+submitting job: nn (lr=0.01, do=0.5, c=124)
+Submitted batch job 23015963
+submitting job: nn (lr=0.001, do=0, c=32)
+Submitted batch job 23015964
+submitting job: nn (lr=0.001, do=0, c=64)
+Submitted batch job 23015965
+submitting job: nn (lr=0.001, do=0, c=124)
+Submitted batch job 23015966
+submitting job: nn (lr=0.001, do=0.25, c=32)
+Submitted batch job 23015967
+submitting job: nn (lr=0.001, do=0.25, c=64)
+Submitted batch job 23015968
+submitting job: nn (lr=0.001, do=0.25, c=124)
+Submitted batch job 23015969
+submitting job: nn (lr=0.001, do=0.5, c=32)
+Submitted batch job 23015970
+submitting job: nn (lr=0.001, do=0.5, c=64)
+Submitted batch job 23015971
+submitting job: nn (lr=0.001, do=0.5, c=124)
+Submitted batch job 23015972
+submitting gnn jobs...
+slurm output log dir does not exist. Creating...
+submitting job: nn (lr=0.001, do=0, c=32)
+Submitted batch job 23015973
+submitting job: nn (lr=0.001, do=0, c=32)
+Submitted batch job 23015974
+submitting job: nn (lr=0.001, do=0, c=32)
+Submitted batch job 23015975
+submitting job: nn (lr=0.001, do=0, c=64)
+Submitted batch job 23015976
+submitting job: nn (lr=0.001, do=0, c=64)
+Submitted batch job 23015977
+submitting job: nn (lr=0.001, do=0, c=64)
+Submitted batch job 23015978
+submitting job: nn (lr=0.001, do=0.25, c=32)
+Submitted batch job 23015979
+submitting job: nn (lr=0.001, do=0.25, c=32)
+Submitted batch job 23015980
+submitting job: nn (lr=0.001, do=0.25, c=32)
+Submitted batch job 23015981
+submitting job: nn (lr=0.001, do=0.25, c=64)
+Submitted batch job 23015982
+submitting job: nn (lr=0.001, do=0.25, c=64)
+Submitted batch job 23015983
+submitting job: nn (lr=0.001, do=0.25, c=64)
+Submitted batch job 23015984

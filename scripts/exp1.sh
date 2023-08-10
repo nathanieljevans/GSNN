@@ -15,6 +15,10 @@ EPOCHS=100
 MAKE_DATA_TIME=04:00:00
 MAKE_DATA_CPUS=4
 MAKE_DATA_MEM=32G
+FEATURE_SPACE="landmark"
+TARGETOME="--targetome_targets"
+STITCH=""
+FULL_GRN=""
 
 GSNN_TIME=03:00:00
 GSNN_MEM=12G
@@ -56,7 +60,8 @@ mkdir $PROC
 echo 'making data...' 
 source ~/.zshrc
 conda activate gsnn 
-python make_data.py --data $DATA --out $PROC --pathways $PATHWAY --feature_space landmark --targetome_targets >> $PROC/make_data.out
+#                                                                                               # Flags->
+python make_data.py --data $DATA --out $PROC --pathways $PATHWAY --feature_space $FEATURE_SPACE $TARGETOME $STITCH $FULL_GRN >> $PROC/make_data.out
 
 echo 'submitting gsnn jobs...'
 mkdir $OUT/GSNN/
