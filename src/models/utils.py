@@ -349,6 +349,9 @@ def corr_score(y, yhat, multioutput='uniform_weighted'):
     y (n_samples, n_outputs): 
     yhat (n_samples, n_outputs):
     '''
+    if len(y.shape) == 1: 
+        y = y.reshape(-1,1)
+        yhat = yhat.reshape(-1,1)
 
     corrs = []
     for i in range(y.shape[1]): 
