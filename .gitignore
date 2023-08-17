@@ -2,3 +2,5 @@
 /src/deprecated/
 /output/
 */SLURM_OUTPUT/
+/scripts/SLURM_OUT/
+*.pyc
