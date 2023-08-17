@@ -322,18 +322,19 @@ def randomize(data):
     edge_index = copy.deepcopy(data.edge_index)
     func_nodes  = (~(data.input_node_mask | data.output_node_mask)).nonzero(as_tuple=True)[0].detach().cpu().numpy()
 
+    # randomize the input edges (e.g., drug targets and omics)
     src,dst = edge_index[:, data.input_edge_mask]
     dst = torch.tensor(np.random.choice(func_nodes, size=(len(dst))), dtype=torch.long)
     edge_index[:, data.input_edge_mask] = torch.stack((src, dst), dim=0)
 
-
+    # randomize the function node connections
     func_edge_mask = ~(data.input_edge_mask | data.output_edge_mask)
     src,dst = edge_index[:, func_edge_mask]
     src = torch.tensor(np.random.choice(func_nodes, size=(len(dst))), dtype=torch.long)
     dst = torch.tensor(np.random.choice(func_nodes, size=(len(dst))), dtype=torch.long)
     edge_index[:, func_edge_mask] = torch.stack((src, dst), dim=0)
 
-
+    # randomize the output edge mask (e.g., endogenous feature connections)
     src,dst = edge_index[:, data.output_edge_mask]
     src = torch.tensor(np.random.choice(func_nodes, size=(len(dst))), dtype=torch.long)
     edge_index[:, data.output_edge_mask] = torch.stack((src, dst), dim=0)

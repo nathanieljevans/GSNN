@@ -38,7 +38,7 @@ class GSNN(torch.nn.Module):
 
         # NOTE: we don't want to scale the input edges (e.g., drug concs),
         # therefore we have to do this before adding residual layers
-        # the drug concs will be primarily zero, and therefore will scale them abnormally large. 
+        # the drug concs will be primarily zero, and therefore will scale the non-zero values abnormally large. 
         x = self.norms[layer](x.view(-1,1)).view(x.size())
         x = self.dropout(x)
 
