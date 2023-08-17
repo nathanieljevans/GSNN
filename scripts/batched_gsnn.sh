@@ -36,7 +36,7 @@ jobid=0
 for lr in 0.05 0.005; do
     for do in 0 0.25 0.5; do 
         for c in 5 10; do
-	    for lay in 10 15; do
+	    for lay in 10 15 20 25; do
 
 jobid=$((jobid+1))
 

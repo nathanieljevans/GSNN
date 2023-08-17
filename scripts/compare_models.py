@@ -65,6 +65,8 @@ if __name__ == '__main__':
         min_ = min(df[x].values.tolist() + df[y].values.tolist())
         max_ = max(df[x].values.tolist() + df[y].values.tolist())
         ax.plot((min_,max_), (min_, max_), 'k--')
+        ax.axvline(0, color='k')
+        ax.axhline(0, color='k')
         sbn.scatterplot(x=x, y=y, data=df, ax=ax, hue='M1_adv')
 
         # center of mass 

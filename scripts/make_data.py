@@ -46,7 +46,7 @@ def get_args():
     
     parser.add_argument("--min_drug_score", type=int, default=999,
                         help="STITCH drug-target confidence score required for inclusion [0,1000]")
-    
+     
     parser.add_argument("--targetome_targets", action='store_true',
                         help="whether to include drug-targets from The Cancer Targetome (Blucher 2017) database'")
     
@@ -71,9 +71,11 @@ def get_args():
     parser.add_argument('--pathways', nargs='+', default=['R-HSA-9006934'],
                         help='Reactome pathway identifiers, gene-set will be used to create sub-graph; pass ["none"] to include full graph')
     
+    parser.add_argument('--dose_trans_eps', type=float, default=1e-6, help='dose (uM) transformation to (log10(x + eps) - log10(eps))/-log10(eps). Pass -666 to use legacy "pseudo-count" style transformation.')
+    
     return parser.parse_args()
 
-def row2obs(row, dataset, dataset_row, uni2dataset_rowidx, sigid2idx, data, node2idx, meta, omics): 
+def row2obs(row, dataset, dataset_row, uni2dataset_rowidx, sigid2idx, data, node2idx, meta, omics, eps): 
     ''' 
 
     Args: 
@@ -106,7 +108,15 @@ def row2obs(row, dataset, dataset_row, uni2dataset_rowidx, sigid2idx, data, node
     # shape: (num_nodes, 1)
     x_dict = {**{n:[0.] for n in func_nodes}, **{n:[0.] for n in drug_nodes}, **{n:[0.] for n in lincs_nodes}}
 
-    x_dict['DRUG__' + obs['pert_id']] = [np.log10(obs['conc_um'] + 1)]
+    # DRUG CONCENTATION TRANSFORMATION 
+    # DEPRECATED ("pseudo-count" style transformation): x_dict['DRUG__' + obs['pert_id']] = [np.log10(obs['conc_um'] + 1)]
+    if eps == -666: 
+        # for legacy reasons, we'll keep an option for the pseudo-count style transformation    
+        x_dict['DRUG__' + obs['pert_id']] = [np.log10(obs['conc_um'] + 1)]
+    else:
+        # This transformation is linear in logspace between [np.log10(eps), inf] AND 0 uM = 0, 1 uM ~ 1. 
+        # Recommended that `eps` should be at least a few orders of magnitude smaller than the smallest concentration in the dataset  
+        x_dict['DRUG__' + obs['pert_id']] = [(np.log10(obs['conc_um'] + eps) - np.log10(eps))/(-np.log10(eps))]
 
     # add expr inputs 
     for node in expr_nodes: 
@@ -392,8 +402,6 @@ if __name__ == '__main__':
 
     # filter low cnt drugs 
     sigcnts = siginfo.groupby('pert_id').count()['sig_id'].reset_index().rename({'sig_id':'cnts'}, axis=1)
-
-    # filter perts with fewer XX number of observations 
     sigcnts = sigcnts[lambda x: x.cnts >= args.min_obs_per_drug]
 
     # remove any drugs that don't have observations in LINCS
@@ -756,7 +764,8 @@ if __name__ == '__main__':
                     data=data, 
                     node2idx=node2idx,
                     meta=meta,
-                    omics=omics)
+                    omics=omics,
+                    eps=args.dose_trans_eps)
 
         torch.save(obs, f'{args.out}/obs/{obs["sig_id"]}.pt')
 

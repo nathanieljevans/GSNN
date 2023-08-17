@@ -49,7 +49,7 @@ def get_args():
     parser.add_argument("--batch", type=int, default=50,
                         help="batch size")
     
-    parser.add_argument("--ids", type=str, default='val_obs.npy',
+    parser.add_argument("--ids", type=str, default='test_obs.npy',
                         help="the data split to evaluate [val_obs.npy, test_obs.npy, train_obs.npy]")
     
     parser.add_argument("--verbose", action='store_true',
@@ -63,8 +63,13 @@ if __name__ == '__main__':
     args = get_args()
     if args.verbose: print(args)
 
+    if torch.cuda.is_available():
+        device = 'cuda'
+    else: 
+        device = 'cpu'
+
     # load model 
-    model = torch.load(f'{args.uid}/{args.model_name}')
+    model = torch.load(f'{args.uid}/{args.model_name}', map_location=torch.device(device))
     typ = str(type(model)).split('.')[-1].strip("'>")
 
     if typ == 'NN':
@@ -93,10 +98,6 @@ if __name__ == '__main__':
 
     val_loader = dataloader(val_dataset, num_workers=args.workers, batch_size=args.batch) 
 
-    if torch.cuda.is_available(): 
-        device = 'cuda'
-    else: 
-        device = 'cpu'
     if args.verbose: print('device:', device)
 
     y_val, yhat_val, sig_ids_val = predict_fn(val_loader, model, data, device)

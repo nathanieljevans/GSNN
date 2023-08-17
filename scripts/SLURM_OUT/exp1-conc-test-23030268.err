@@ -1,0 +1,8 @@
+rm: cannot remove '../output/exp1-conc-test/': No such file or directory
+  File "/home/exacloud/gscratch/NGSdev/evans/GSNN/scripts/make_data.py", line 119
+    x_dict['DRUG__' + obs['pert_id']] = [np.log10(obs['conc_um'] + eps) - np.log10(eps))/(-np.log10(eps))]
+                                                                                       ^
+SyntaxError: closing parenthesis ')' does not match opening parenthesis '['
+mkdir: cannot create directory '../output/exp1-conc-test//GSNN/': File exists
+mkdir: cannot create directory '../output/exp1-conc-test//NN/': File exists
+mkdir: cannot create directory '../output/exp1-conc-test//GNN/': File exists

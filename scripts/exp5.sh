@@ -4,9 +4,11 @@
 ###     $ ./exp1.sh 1
 ### NOTE: the $1 value defines the name suffix, for use calling multiple exp (diff train/test/val splits) 
 
+# Programmed Cell Death
+
 ########## PARAMS #########
 NAME=exp5
-PATHWAY=R-HSA-9006934
+PATHWAY=R-HSA-5357801
 DATA=../../data/
 OUT=../output/$NAME-$1/
 PROC=$OUT/proc/
@@ -15,12 +17,12 @@ EPOCHS=100
 MAKE_DATA_TIME=04:00:00
 MAKE_DATA_CPUS=8
 MAKE_DATA_MEM=32G
-FEATURE_SPACE="landmark best-inferred"
+FEATURE_SPACE="landmark"
 TARGETOME="--targetome_targets"
 STITCH=""
 FULL_GRN=""
 
-GSNN_TIME=2-00:00:00
+GSNN_TIME=12:00:00
 GSNN_MEM=32G
 GSNN_BATCH=50
 GSNN_GRES=gpu:1
@@ -29,7 +31,7 @@ NN_TIME=04:00:00
 NN_MEM=12G
 NN_BATCH=256
 
-GNN_TIME=12:00:00
+GNN_TIME=6:00:00
 GNN_MEM=12G
 GNN_GRES=gpu:1
 GNN_BATCH=50
