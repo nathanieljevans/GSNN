@@ -50,26 +50,27 @@ class GSNN(torch.nn.Module):
         
         return x, x_last
 
-    def forward(self, x, return_time_series=False):
+    def forward(self, x, return_activations=False, mask=None):
         '''
         Assumes x is `node` indexed 
         ''' 
         #alpha = torch.sigmoid(self.alpha)
         # convert x from node-indexed to edge-indexed
-        if return_time_series: out = [x]
+        if return_activations: out = []
         x0 = utils.node2edge(x, self.edge_index)
         x=x0
         if self.residual: x_last = x
         for l in range(self.layers): 
             x, x_last = self.edge_update(x, x0, x_last, l)
-            if return_time_series: out.append(x)
+            if mask is not None: x = mask * x
+            if return_activations: out.append(x)
 
         # scale by num layers 
         x /= self.layers
 
         # convert x from edge-indexed to node-indexed
-        if return_time_series: 
-            return torch.stack([utils.edge2node(x, self.edge_index, self.output_node_mask) for x in out], dim=0)
+        if return_activations: 
+            return torch.stack(out, dim=0)
         else: 
             return utils.edge2node(x, self.edge_index, self.output_node_mask)
 
