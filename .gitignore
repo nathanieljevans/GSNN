@@ -1,6 +1,5 @@
 /processed_data/
 /src/deprecated/
 /output/
-*/SLURM_OUTPUT/
-/scripts/SLURM_OUT/
+*/SLURM_OUT/
 *.pyc

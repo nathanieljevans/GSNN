@@ -1,4 +1,0 @@
-rm: cannot remove '../output/exp9-5/': No such file or directory
-mkdir: cannot create directory '../output/exp9-5//GSNN/': File exists
-mkdir: cannot create directory '../output/exp9-5//NN/': File exists
-mkdir: cannot create directory '../output/exp9-5//GNN/': File exists

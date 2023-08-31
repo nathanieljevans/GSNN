@@ -7,7 +7,7 @@ import numpy as np
 
 class GSNNExplainer: 
 
-    def __init__(self, model, data, ignore_cuda=False, hard=False, tau0=3, min_tau=0.5, prior=1, normalize_target=True): 
+    def __init__(self, model, data, ignore_cuda=False, gumbel_softmax=True, hard=False, tau0=3, min_tau=0.5, prior=1, normalize_target=True): 
         '''
         Adapted from the methods presented in `GNNExplainer` (https://arxiv.org/abs/1903.03894). 
 
@@ -24,7 +24,7 @@ class GSNNExplainer:
         Returns 
             None 
         '''
-
+        self.gumbel_softmax = gumbel_softmax
         self.normalize_target = normalize_target
         self.prior = prior
         self.hard = hard
@@ -40,7 +40,7 @@ class GSNNExplainer:
         self.model = model
 
     def explain(self, x, targets=None, iters=250, lr=1e-2, weight_decay=1e-5, 
-                      beta=1, verbose=True, optimizer=torch.optim.Adam, desired_edges=1000, eps=1e-8): 
+                      beta=1, verbose=True, optimizer=torch.optim.SGD, desired_edges=1000, eps=1e-8): 
         '''
         initializes and runs gradient descent to select a minimal subset of edges that produce comparable predictions to the full graph. 
         
@@ -75,11 +75,14 @@ class GSNNExplainer:
             target = (target - _mean)/(_std + eps)
 
         
-
-        # initialize parameter mask 
-        weights = torch.stack((self.prior*torch.ones(self.data.edge_index.size(1), dtype=torch.float32, device=self.device, requires_grad=True), 
-                               -self.prior*torch.ones(self.data.edge_index.size(1), dtype=torch.float32, device=self.device, requires_grad=True)), dim=0)
-        edge_params = torch.nn.Parameter(weights)
+        if self.gumbel_softmax: 
+            # initialize parameter mask 
+            weights = torch.stack((self.prior*torch.ones(self.data.edge_index.size(1), dtype=torch.float32, device=self.device, requires_grad=True), 
+                                -self.prior*torch.ones(self.data.edge_index.size(1), dtype=torch.float32, device=self.device, requires_grad=True)), dim=0)
+            edge_params = torch.nn.Parameter(weights)
+        else: 
+            # continuous weights 
+            edge_params = torch.nn.Parameter(self.prior*torch.zeros(self.data.edge_index.size(1), dtype=torch.float32, device=self.device, requires_grad=True))
 
         # optimize parameter mask with objective 
         crit = torch.nn.MSELoss()  
@@ -99,8 +102,11 @@ class GSNNExplainer:
 
             mask = []
             for b in range(batch):
-                _mask, _rev_mask = torch.nn.functional.gumbel_softmax(edge_params, dim=0, hard=self.hard, tau=tau)
-                mask.append(_mask.view(1, -1, 1))
+                if self.gumbel_softmax:
+                    _mask, _rev_mask = torch.nn.functional.gumbel_softmax(edge_params, dim=0, hard=self.hard, tau=tau)
+                    mask.append(_mask.view(1, -1, 1))
+                else: 
+                    mask.append(torch.sigmoid(edge_params).view(1, -1, 1))
 
             mask = torch.cat(mask, dim=0)
 
@@ -109,17 +115,10 @@ class GSNNExplainer:
             if self.normalize_target: 
                 out = (out - _mean)/(_std +  eps)
 
-            # warmup? np.sin(3.14*iter/iters/2)
-            #reg_loss = beta*mask.mean()
-            #loss = mse_loss + reg_loss 
-
             _target = target.expand(batch, -1)[:, targets].detach()
             _target_recon = out[:, targets]
-            #_q_y =  torch.nn.functional.softmax(edge_params.data, dim=-1).unsqueeze(0).expand(batch, -1, -1).view(batch, -1) # batch, latent_dim (E), categorical_dim (2)
-            #mse, kld = loss_function(_target_recon, _target, _q_y)
             
-            reg_loss = beta*max(mask.sum()/batch - desired_edges, 0)
-            #kld = 0
+            reg_loss = beta*(max(mask.sum()/batch, desired_edges) - desired_edges)
 
             mse = crit(_target_recon, _target)
             loss = mse + reg_loss
@@ -138,30 +137,10 @@ class GSNNExplainer:
 
             if verbose: print(f'iter: {iter} || MSE: {mse:.3f} || r2: {r2:.2f} || reg_loss: {reg_loss:.2f} || tau: {tau:.2f} || avg num sel edges: {mask.sum()/batch:.1f}', end='\r')
 
-        edge_scores, _ = torch.nn.functional.softmax(edge_params.data, dim=0).detach().cpu().numpy()
+        if self.gumbel_softmax: 
+            edge_scores, _ = torch.nn.functional.softmax(edge_params.data, dim=0).detach().cpu().numpy()
+        else: 
+            edge_scores = torch.sigmoid(edge_params).detach().cpu().numpy()
         src,dst = self.data.node_names[self.data.edge_index.detach().cpu().numpy()]
         edgedf = pd.DataFrame({'source':src, 'target':dst, 'score':edge_scores})
         return edgedf
-    
-
-
-
-
-
-
-'''
-def loss_function(recon_x, x, qy):
-    __categorical_dim = 2
-    # Reconstruction Loss:
-    # For regression, use Mean Squared Error (MSE) instead of Binary Cross Entropy (BCE).
-    # This loss measures the difference between the reconstructed output and the true output.
-    MSE = torch.nn.functional.mse_loss(recon_x, x, reduction='sum') / x.shape[0]
-
-    # KL Divergence Loss:
-    # This part remains the same. It measures how much the learned qy distribution 
-    # deviates from a target (prior) distribution, ensuring the latent space has good properties.
-    log_ratio = torch.log(qy * __categorical_dim + 1e-20)
-    KLD = torch.sum(qy * log_ratio, dim=-1).mean()
-
-    return MSE, KLD
-'''

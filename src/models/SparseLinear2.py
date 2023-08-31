@@ -18,7 +18,7 @@ class Conv(pyg.nn.MessagePassing):
 
 
 class SparseLinear2(torch.nn.Module): 
-    def __init__(self, indices, size, d=None, dtype=torch.float32):
+    def __init__(self, indices, size, d=None, dtype=torch.float32, bias=True):
         '''
         
         We use `Kaiming` Weight Initialization, if `d` (layer dimension) is provided. Remember, each layer can be thought of as 
@@ -53,7 +53,7 @@ class SparseLinear2(torch.nn.Module):
         # optimizers require dense parameters 
         self.values = torch.nn.Parameter(values)
         self.register_buffer('indices', indices.type(torch.long))
-        self.bias = torch.nn.Parameter(torch.zeros((self.M, 1), dtype=dtype))
+        if bias: self.bias = torch.nn.Parameter(torch.zeros((self.M, 1), dtype=dtype))
 
         # cache
         self.edge_index = None 
@@ -65,31 +65,13 @@ class SparseLinear2(torch.nn.Module):
     def forward(self, x): 
         '''
         Assumes x is in shape: (B, N, 1), where B is batch dimension
-        # weight shape is (N, M)
+        weight shape is (N, M)
         Returns shape (B, M, 1)
+
+        batch dimension is handled in `torch_geometric` fashion, e.g., concatenated batch graphs via incremented node idx 
         '''
         B = x.size(0)
         E = self.indices.size(1)
-
-        '''
-        if (self.edge_index is not None) & (self.edge_id is not None) & (self.B == B): 
-            
-            edge_index = self.edge_index 
-            edge_id = self.edge_id 
-            bias_idx = self.bias_idx
-            batched_size = self.batched_size
-        else: 
-            edge_index = self.indices.repeat(1, B) + torch.stack((torch.arange(B).repeat_interleave(E)*self.N,
-                                                                  torch.arange(B).repeat_interleave(E)*self.M), dim=0)
-            edge_id = torch.arange(self.indices.size(1)).repeat(B)
-            bias_idx = torch.arange(self.M).repeat(B)
-            batched_size = (self.N*B, self.M*B)
-            self.edge_index = edge_index 
-            self.edge_id = edge_id 
-            self.bias_idx = bias_idx
-            self.B = B 
-            self.batched_size = batched_size
-        '''
 
         edge_index = self.indices.repeat(1, B) + torch.stack((torch.arange(B, device=x.device).repeat_interleave(E)*self.N,
                                                                   torch.arange(B, device=x.device).repeat_interleave(E)*self.M), dim=0)
@@ -97,13 +79,16 @@ class SparseLinear2(torch.nn.Module):
         bias_idx = torch.arange(self.M).repeat(B)
         batched_size = (self.N*B, self.M*B)
 
-        device = x.device
-        edge_id = edge_id.to(device)
-        bias_idx = bias_idx.to(device)
-        edge_index = edge_index.to(device)
+        edge_id = edge_id.to(x.device)
+        bias_idx = bias_idx.to(x.device)
+        edge_index = edge_index.to(x.device)
 
         edge_weight = self.values[edge_id]
-        bias = self.bias[bias_idx]
+
+        if hasattr(self, 'bias'):
+            bias = self.bias[bias_idx]
+        else: 
+            bias = torch.zeros((self.M, 1)[bias_idx], device=x.device)
 
         x = x.view(-1,1)
 

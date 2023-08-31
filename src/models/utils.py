@@ -73,13 +73,12 @@ class TBLogger():
                        'eval_at_epoch':epoch
                        }
         
-
         self.writer.add_hparams(hparam_dict, metric_dict)
 
     def log(self, epoch, train_loss, test_r2, test_r_flat):
         self.writer.add_scalar('train-loss', train_loss, epoch)
-        self.writer.add_scalar('test-r2', test_r2, epoch)
-        self.writer.add_scalar('test-corr-flat', test_r_flat, epoch)
+        self.writer.add_scalar('val-r2', test_r2, epoch)
+        self.writer.add_scalar('val-corr-flat', test_r_flat, epoch)
 
 
 def get_activation(act): 
@@ -412,3 +411,14 @@ def get_regressed_r(y, yhat, sig_ids, vars, data='../../data/', multioutput='uni
     yhat_res = regress_out(yhat, df, vars=vars)
 
     return corr_score(y_res, yhat_res, multioutput=multioutput)
+
+
+def next_divisor(N, X):
+    '''
+    returns the smallest divisor of N which is larger than or equal to X
+    '''
+    i = X
+    while N % i != 0:
+        i += 1
+
+    return i

@@ -216,10 +216,10 @@ if __name__ == '__main__':
 
         y,yhat,sig_ids = utils.predict_gnn(test_loader, model, data, device)
         r_cell, r_drug, r_dose = utils._get_regressed_metrics(y, yhat, sig_ids, siginfo)
-        r2_test = r2_score(y, yhat, multioutput='variance_weighted')
-        r_flat_test = np.corrcoef(y.ravel(), yhat.ravel())[0,1]
+        r2_val = r2_score(y, yhat, multioutput='variance_weighted')
+        r_flat_val = np.corrcoef(y.ravel(), yhat.ravel())[0,1]
 
-        logger.log(epoch, loss_train, r2_test, r_flat_test)
+        logger.log(epoch, loss_train, r2_val, r_flat_val)
         
         if (epoch % args.save_every == 0): 
 
@@ -237,5 +237,5 @@ if __name__ == '__main__':
 
             torch.save(model, out_dir + f'/model-{epoch}.pt')
 
-        print(f'Epoch: {epoch} || loss (train): {loss_train:.3f} || r2 (test): {r2_test:.2f} || r flat (test): {r_flat_test:.2f} || r cell: {r_cell:.2f} || r drug: {r_drug:.2f} || elapsed: {(time.time() - big_tic)/60:.2f} min')
+        print(f'Epoch: {epoch} || loss (train): {loss_train:.3f} || r2 (val): {r2_val:.2f} || r flat (val): {r_flat_val:.2f} || r cell: {r_cell:.2f} || r drug: {r_drug:.2f} || elapsed: {(time.time() - big_tic)/60:.2f} min')
 

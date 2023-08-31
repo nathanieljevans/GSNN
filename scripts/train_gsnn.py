@@ -26,7 +26,7 @@ def get_args():
     parser.add_argument("--out", type=str, default='../output/',
                         help="path to output directory")
     
-    parser.add_argument("--batch", type=int, default=100,
+    parser.add_argument("--batch", type=int, default=50,
                         help="training batch size")
     
     parser.add_argument("--workers", type=int, default=12,
@@ -50,13 +50,13 @@ def get_args():
     parser.add_argument("--channels", type=int, default=5,
                         help="number of channels for each function node")
     
-    parser.add_argument("--layers", type=int, default=10,
+    parser.add_argument("--layers", type=int, default=15,
                         help="number of layers of message passing")
     
     parser.add_argument("--dropout", type=float, default=0.,
                         help="")
     
-    parser.add_argument("--lr", type=float, default=1e-3,
+    parser.add_argument("--lr", type=float, default=1e-2,
                         help="learning rate")
     
     parser.add_argument("--wd", type=float, default=0.,
@@ -79,8 +79,30 @@ def get_args():
     
     parser.add_argument("--save_every", type=int, default=20,
                         help="saves model results and weights every X epochs")
+
+    parser.add_argument("--dropout_type", type=str, default='layerwise',
+                        help="type of dropout to perform: 'edgewise' will drop edges across all layers (e.g., same edge removed for all layers). \
+                            'layerwise' will dropout unique edges from each layer. 'nodewise' will dropout all edges from a given node.")                   
     
-    return parser.parse_args()
+    parser.add_argument("--norm", type=str, default='layer',
+                        help="norm type [edge-batch, layer-batch, layer, group]")
+    
+    parser.add_argument("--no_bias", action='store_true',
+                        help="whether to include a bias term in the function node neural networks.")
+    
+    parser.add_argument("--stochastic_depth", action='store_true',
+                        help="whether to use the `stochastic depth` technique during training (https://arxiv.org/abs/1603.09382)")
+    
+    parser.add_argument("--null_inflation", type=float, default=0.,
+                        help="proportion of training dataset that should be inflated with 'null' obs, e.g., zero-drug, zero-output")
+    
+    args = parser.parse_args()
+
+    # checks 
+    assert args.dropout_type in ['edgewise', 'layerwise', 'nodewise'], f'unexpected argument `dropout_type` : {args.dropout_type}'
+    assert args.norm in ['layer', 'edge-batch', 'layer-batch', 'group'], f'unexpected argument `norm` : {args.norm}'
+
+    return args
     
 
 
@@ -118,15 +140,15 @@ if __name__ == '__main__':
     data = torch.load(f'{args.data}/Data.pt')
 
     train_ids = np.load(f'{args.data}/train_obs.npy', allow_pickle=True)
-    train_dataset = LincsDataset(root=f'{args.data}', sig_ids=train_ids)
+    train_dataset = LincsDataset(root=f'{args.data}', sig_ids=train_ids, data=data, null_inflation=args.null_inflation)
     train_loader = DataLoader(train_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=True)
 
     test_ids = np.load(f'{args.data}/test_obs.npy', allow_pickle=True)
-    test_dataset = LincsDataset(root=f'{args.data}', sig_ids=test_ids)
+    test_dataset = LincsDataset(root=f'{args.data}', sig_ids=test_ids, data=data)
     test_loader = DataLoader(test_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=False)
 
     val_ids = np.load(f'{args.data}/val_obs.npy', allow_pickle=True)
-    val_dataset = LincsDataset(root=f'{args.data}', sig_ids=val_ids)
+    val_dataset = LincsDataset(root=f'{args.data}', sig_ids=val_ids, data=data)
     val_loader = DataLoader(val_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=False)
 
     if args.randomize: data.edge_index = utils.randomize(data)
@@ -140,7 +162,11 @@ if __name__ == '__main__':
              layers=args.layers, 
              dropout=args.dropout,
              residual=not args.no_residual,
-             nonlin=utils.get_activation(args.nonlin)).to(device)
+             nonlin=utils.get_activation(args.nonlin),
+             dropout_type=args.dropout_type,
+             norm=args.norm,
+             bias=~args.no_bias,
+             stochastic_depth=args.stochastic_depth).to(device)
     
     n_params = sum([p.numel() for p in model.parameters()])
     args.n_params = n_params
@@ -163,12 +189,9 @@ if __name__ == '__main__':
         losses = []
         for i,(x, y, sig_id) in enumerate(train_loader): 
 
-            if len(sig_id) == 1: 
-                # BUG: if batch only has 1 obs it fails
-                continue 
+            if len(sig_id) == 1: continue # BUG workaround: if batch only has 1 obs it fails
 
-            if args.cell_agnostic: 
-                x[:, omic_input_idxs] = 0.
+            if args.cell_agnostic: x[:, omic_input_idxs] = 0.
 
             tic = time.time()
             optim.zero_grad() 
@@ -177,6 +200,7 @@ if __name__ == '__main__':
             y = y.to(device).squeeze(-1)[:, data.output_node_mask]
 
             loss = crit(yhat, y)
+
             loss.backward()
             if args.clip_grad is not None: torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
             optim.step()
@@ -195,12 +219,12 @@ if __name__ == '__main__':
         
         loss_train = np.mean(losses)
 
-        y,yhat,sig_ids = utils.predict_gsnn(test_loader, model, data, device)
+        y,yhat,sig_ids = utils.predict_gsnn(val_loader, model, data, device)
         r_cell, r_drug, r_dose = utils._get_regressed_metrics(y, yhat, sig_ids, siginfo)
-        r2_test = r2_score(y, yhat, multioutput='variance_weighted')
-        r_flat_test = np.corrcoef(y.ravel(), yhat.ravel())[0,1]
+        r2_val = r2_score(y, yhat, multioutput='variance_weighted')
+        r_flat_val = np.corrcoef(y.ravel(), yhat.ravel())[0,1]
 
-        logger.log(epoch, loss_train, r2_test, r_flat_test)
+        logger.log(epoch, loss_train, r2_val, r_flat_val)
 
         if (epoch % args.save_every == 0): 
 
@@ -218,4 +242,4 @@ if __name__ == '__main__':
 
             torch.save(model, out_dir + f'/model-{epoch}.pt')
 
-        print(f'Epoch: {epoch} || loss (train): {loss_train:.3f} || r2 (test): {r2_test:.2f} || r flat (test): {r_flat_test:.2f} || r cell: {r_cell:.2f} || r drug: {r_drug:.2f} || elapsed: {(time.time() - big_tic)/60:.2f} min')
+        print(f'Epoch: {epoch} || loss (train): {loss_train:.3f} || r2 (val): {r2_val:.2f} || r flat (val): {r_flat_val:.2f} || r cell: {r_cell:.2f} || r drug: {r_drug:.2f} || elapsed: {(time.time() - big_tic)/60:.2f} min')

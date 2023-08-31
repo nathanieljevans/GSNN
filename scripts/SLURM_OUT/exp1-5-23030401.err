@@ -1,3 +1,0 @@
-mkdir: cannot create directory '../output/exp1-5//GSNN/': File exists
-mkdir: cannot create directory '../output/exp1-5//NN/': File exists
-mkdir: cannot create directory '../output/exp1-5//GNN/': File exists
