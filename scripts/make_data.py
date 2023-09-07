@@ -820,6 +820,8 @@ if __name__ == '__main__':
     torch.save(data, f'{args.out}/Data.pt')
     print('done.')
 
+    with open(f'{args.out}/make_data_completed_successfully.flag', 'w') as f: 
+         f.write(':)')
 
 
     

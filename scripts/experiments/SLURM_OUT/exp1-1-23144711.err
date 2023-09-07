@@ -1,0 +1,7 @@
+mkdir: cannot create directory ‘../output/exp1-1//GSNN/’: File exists
+mkdir: cannot create directory ‘../output/exp1-1//GSNN/’: File exists
+mkdir: cannot create directory ‘../output/exp1-1//NN/’: File exists
+mkdir: cannot create directory ‘../output/exp1-1//NN/’: File exists
+mkdir: cannot create directory ‘../output/exp1-1//GNN/’: File exists
+mkdir: cannot create directory ‘../output/exp1-1//GNN/’: File exists
+./batched_gnn.sh:21: no matches found: ../output/exp1-1//GNN//slurm_logs__GNN//*

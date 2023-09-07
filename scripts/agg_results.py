@@ -1,3 +1,11 @@
+'''
+aggregate GSNN results from a given directory and sub-directories. The aggregated `results.csv` file will be saved in root directory.  
+NOTE: install `gsnn_tf` conda env from `enviroment2.yml`. 
+
+use: 
+(gsnn_tf) $ python agg_results.py --root ../output/
+'''
+
 import os
 import pandas as pd
 from tbparse import SummaryReader

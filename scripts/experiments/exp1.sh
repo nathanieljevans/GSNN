@@ -39,7 +39,7 @@ FULL_GRN=""
 
 GSNN_TIME=24:00:00
 GSNN_MEM=32G
-GSNN_BATCH=50
+GSNN_BATCH=25
 GSNN_GRES=gpu:1
 
 NN_TIME=05:00:00
@@ -69,32 +69,37 @@ sbatch <<EOF
 # extended GRN: No 
 #
 
-echo 'removing out dir and making proc dir...'
-rm -r $OUT
-mkdir $OUT 
-mkdir $PROC
-
+cd .. 
+pwd
 echo 'making data...' 
 source ~/.zshrc
 conda activate gsnn 
-cd .. 
+
+echo 'removing out dir and making proc dir...'
+rm -r $OUT
+mkdir $OUT
+mkdir $PROC
+
 #                                                                                               # Flags->
 python make_data.py --data $DATA --out $PROC --pathways $PATHWAY --feature_space $FEATURE_SPACE $TARGETOME $STITCH $FULL_GRN >> $PROC/make_data.out
 
-echo 'submitting gsnn jobs...'
-mkdir $OUT/GSNN/
-#                                          HH:MM:SS MEM BTCH GRES        
-./batched_gsnn.sh $PROC $OUT/GSNN/ $EPOCHS $GSNN_TIME $GSNN_MEM $GSNN_BATCH $GSNN_GRES 
+if [ -e "$PROC/make_data_completed_successfully.flag" ]; then
+	echo 'submitting gsnn jobs...'
+	mkdir $OUT/GSNN/
+	#                                          HH:MM:SS MEM BTCH GRES        
+	./batched_gsnn.sh $PROC $OUT/GSNN/ $EPOCHS $GSNN_TIME $GSNN_MEM $GSNN_BATCH $GSNN_GRES 
 
-echo 'submitting nn jobs...'
-mkdir $OUT/NN/
-#                                      HH:MM:SS MEM BTCH
-./batched_nn.sh $PROC $OUT/NN/ $EPOCHS $NN_TIME $NN_MEM $NN_BATCH
+	echo 'submitting nn jobs...'
+	mkdir $OUT/NN/
+	#                                      HH:MM:SS MEM BTCH
+	./batched_nn.sh $PROC $OUT/NN/ $EPOCHS $NN_TIME $NN_MEM $NN_BATCH
 
-echo 'submitting gnn jobs...'
-mkdir $OUT/GNN/
-#                                        HH:MM:SS MEM GRES  BTCH
-./batched_gnn.sh $PROC $OUT/GNN/ $EPOCHS $GNN_TIME $GNN_MEM $GNN_GRES $GNN_BATCH
-
+	echo 'submitting gnn jobs...'
+	mkdir $OUT/GNN/
+	#                                        HH:MM:SS MEM GRES  BTCH
+	./batched_gnn.sh $PROC $OUT/GNN/ $EPOCHS $GNN_TIME $GNN_MEM $GNN_GRES $GNN_BATCH
+else 
+	echo "make_data.py did not complete successfully. no model batch scripts submitted."
+fi
 EOF
 
