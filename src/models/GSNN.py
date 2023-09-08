@@ -1,15 +1,20 @@
 import torch 
+import numpy as np 
+from torch_geometric.utils import degree
 #from src.models.SparseLinear import SparseLinear
 from src.models.SparseLinear2 import SparseLinear2 as SparseLinear
 from src.models import utils
 
+
 class GSNN(torch.nn.Module): 
 
     def __init__(self, edge_index, channels, input_node_mask, output_node_mask, layers, residual=True, dropout=0., 
-                            nonlin=torch.nn.ELU, dropout_type='layerwise', norm='batch', bias=True, stochastic_depth=True): 
+                            nonlin=torch.nn.ELU, dropout_type='layerwise', norm='batch', bias=True, stochastic_depth=True,
+                                share_layers=False, fix_hidden_channels=False):
         super().__init__()
 
-        self.stochastic_depth = stochastic_depth  # https://arxiv.org/abs/1603.09382
+        self.share_layers = share_layers            # whether to share function node parameters across layers
+        self.stochastic_depth = stochastic_depth    # faster training; regularization (https://arxiv.org/abs/1603.09382)
         self.dropout_type = dropout_type
         self.register_buffer('output_node_mask', output_node_mask)
         self.input_node_mask = input_node_mask
@@ -23,10 +28,20 @@ class GSNN(torch.nn.Module):
         self.N = torch.unique(edge_index.view(-1)).size(0)      # number of nodes
 
         self.dropout = dropout
-        self.lin1 = SparseLinear(indices=utils.get_W1_indices(edge_index, channels), size=(self.E,channels*self.N), d=channels, bias=bias)
-        self.lin2 = SparseLinear(indices=utils.get_W2_indices(function_nodes, channels), size=(channels*self.N, channels*self.N), d=channels, bias=bias)
-        self.lin3 = SparseLinear(indices=utils.get_W3_indices(edge_index, function_nodes, channels), size=(channels*self.N, self.E), d=1, bias=bias)
+
+        # Sparse Linear Layer Construction 
+        _n = 1 if self.share_layers else self.layers
+        w1_indices, node_hidden_channels = utils.get_W1_indices(edge_index, channels, function_nodes, scale_by_degree=not fix_hidden_channels)
+        w2_indices = utils.get_W2_indices(function_nodes, node_hidden_channels)
+        w3_indices = utils.get_W3_indices(edge_index, function_nodes, node_hidden_channels)
+        w1_size = (self.E, np.sum(node_hidden_channels))
+        w2_size = (np.sum(node_hidden_channels), np.sum(node_hidden_channels))
+        w3_size = (np.sum(node_hidden_channels), self.E)
+        self.lins1 = torch.nn.ModuleList([SparseLinear(indices=w1_indices, size=w1_size, bias=bias)               for _ in range(_n)])
+        self.lins2 = torch.nn.ModuleList([SparseLinear(indices=w2_indices, size=w2_size, bias=bias) for _ in range(_n)])
+        self.lins3 = torch.nn.ModuleList([SparseLinear(indices=w3_indices, size=w3_size, bias=bias) for _ in range(_n)])
         
+        # Normalization layers 
         # NOTE: only include affine on last layer to let predicted outputs scale appropriately. Note, affine is element wise for all. 
         self.norm_type = norm
         if norm == 'edge-batch': 
@@ -60,11 +75,16 @@ class GSNN(torch.nn.Module):
         #x = (1-self.input_edge_mask.view(1, self.E, 1))*self.norms[layer](x.squeeze(-1)).unsqueeze(-1) + self.input_edge_mask.view(1, self.E, 1)*x
 
         # edge update 
-        x = self.lin1(x)        
+        if self.share_layers: 
+            _l = 0
+        else: 
+            _l = layer 
+
+        x = self.lins1[_l](x)        
         x = self.nonlin(x)      # latent node activations | (B, num_nodes*channels)
-        x = self.lin2(x)
+        x = self.lins2[_l](x)
         x = self.nonlin(x)      # latent node activations | (B, num_nodes*channels)
-        x = self.lin3(x)        # edge activations        | (B, E)
+        x = self.lins3[_l](x)   # edge activations        | (B, E)
 
         if not hasattr(self, 'dropout_type'): 
             pass 

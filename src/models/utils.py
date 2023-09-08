@@ -8,6 +8,8 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import LabelBinarizer
+import torch_geometric as pyg
+from sklearn.preprocessing import minmax_scale
 
 def _get_regressed_metrics(y, yhat, sig_ids, siginfo): 
     try: 
@@ -75,10 +77,10 @@ class TBLogger():
         
         self.writer.add_hparams(hparam_dict, metric_dict)
 
-    def log(self, epoch, train_loss, test_r2, test_r_flat):
+    def log(self, epoch, train_loss, val_r2, val_r_flat):
         self.writer.add_scalar('train-loss', train_loss, epoch)
-        self.writer.add_scalar('val-r2', test_r2, epoch)
-        self.writer.add_scalar('val-corr-flat', test_r_flat, epoch)
+        self.writer.add_scalar('val-r2', val_r2, epoch)
+        self.writer.add_scalar('val-corr-flat', val_r_flat, epoch)
 
 
 def get_activation(act): 
@@ -133,42 +135,109 @@ def get_scheduler(optim, args, loader):
         raise ValueError(f'unrecognized lr scheduler: {args.sched}')
     
 
-
-def get_W1_indices(edge_index, channels): 
+def _degree_to_channels(edge_index, min_size=2, max_size=25, transform=np.sqrt, verbose=True, scale_by='in_degree', clip_degree=250): 
     '''
-    # how to create input layer , e.g., edge values -> node indices 
+    utility function to create variable number of channels per function node, dependent on the degree of each node. 
 
+    # channels = minmax_scale(transform(degree), range=(min_size, max_size))
 
+    Args: 
+        edge_index          torch.tensor            COO format graph edge index 
+        min_size            int                     minimum number of channels 
+        max_size            int                     maximum number of channels 
+        transform           function                transformation to be applied to degree prior to min-max scaling between range( )
+        verbose             bool                    whether to print summary statistics to console 
+        scale_by            str                     the choice of scaling metric, options: 'in_degree', 'out_degree', 'degree' 
+        clip_degree         int;None                whether to clip the maximum degree value; useful if there are outliers with large degree
+
+    Returns:
+        scaled_channels 
     '''
-    row = [] 
+    num_nodes = torch.unique(edge_index.view(-1)).size(0)
+    row, col = edge_index 
+    out_degree = pyg.utils.degree(row, num_nodes).detach().cpu().numpy() 
+    in_degree = pyg.utils.degree(col, num_nodes).detach().cpu().numpy() 
+
+    if scale_by == 'in_degree': 
+        degree = in_degree 
+    elif scale_by == 'out_degree': 
+        degree = out_degree 
+    elif scale_by == 'degree': 
+        degree = in_degree + out_degree 
+    else: 
+        raise ValueError(f'`_degree_to_channels` got unexpected `scale_by` argument, expected one of: in_degree, out_degree, degree but got: {scale_by}')
+    
+    if clip_degree is not None: 
+        degree = np.clip(degree, 0, clip_degree)
+
+    scaled_channels = transform(degree)                                                                                     # apply degree transformation 
+    func_node_mask = (in_degree > 0) * (out_degree > 0)
+    scaled_channels[func_node_mask] = minmax_scale(scaled_channels[func_node_mask], feature_range=(min_size, max_size))     # scale between `min_size` and `max_size`
+    scaled_channels = np.array([int(np.round(x, decimals=0)) for x in scaled_channels])                                     # ensure integers 
+    scaled_channels[~func_node_mask] = 0                                                                                    # only function nodes need hidden channels; input/output nodes have no function. To ensure proper indexing, we will have a surrogate index for input/output nodes. Note: this does not impact the number of parameters. 
+    if verbose: print('mean # of function node channels (scaled)', np.mean(scaled_channels[func_node_mask]))
+    return scaled_channels
+
+
+def get_W1_indices(edge_index, channels, function_nodes, scale_by_degree=True): 
+    '''
+    how to create input layer , e.g., edge values -> node indices 
+
+    Args: 
+        edge_index          torch tensor            COO edge index describing the structural graph 
+        channels            int                     if `scale_by_degree` is false, then this will be the number of hidden channels in each function 
+                                                    node; otherwise this will be the maximum number of channels in the function node.  
+        function_nodes
+        scale_by_degree     bool                    whether to scale the number of hidden channels based on the function node degree; input and output 
+                                                    nodes will have 0 channels
+    
+    Returns: 
+        indices             torch tensor            COO format for the W1 indices
+        _channels           numpy array             the number of hidden channels for each node, indexed by node id; e.g., node 10 will have _channels[10] hidden channels
+    '''
+
+    if scale_by_degree:
+        _channels = _degree_to_channels(edge_index, max_size=channels)
+    else: 
+        _channels = np.zeros(edge_index.size(1), dtype=int) 
+        _channels[function_nodes] = channels
+
+    row = []
     col = []
-    for edge_id, (src, node_id) in enumerate(edge_index.detach().cpu().numpy().T):
-        for k in range(channels): 
+    for edge_id, (_, node_id) in enumerate(edge_index.detach().cpu().numpy().T):
+        if node_id not in function_nodes: continue # skip the output nodes 
+        c = _channels[node_id] # number of func. node channels 
+        node_id_idx0 = np.sum(_channels[:node_id.item()])       # node indexing: index of the first hidden channel for a given function node 
+        for k in range(c): 
             row.append(edge_id)
-            col.append(channels*node_id.item() + k)
+            col.append(node_id_idx0 + k)
 
     row = torch.tensor(row, dtype=torch.float32)
     col = torch.tensor(col, dtype=torch.float32)
     indices = torch.stack((row,col), dim=0)
-    return indices
+    return indices, _channels
 
 
 def get_W2_indices(function_nodes, channels): 
     '''
-    # how to create node -> node latent weight indices 
+    how to create node -> node latent weight indices for W2 
 
-    # for node_id in function_nodes 
-        # for k in channels: 
-            # for k2 in channels: 
-                # add weight indice: (node_id + k, node_id + k2)
+    Args: 
+        function_nodes      torch tensor        the node index for function nodes (e.g., in_degree > 0 and out_degree > 0)
+        channels            numpy array         the number of hidden channels for each function node, indexed by node 
+
+    Returns: 
+        indices             torch tensor        COO format edge indices for W2 
     '''
     row = []
     col = []
     for node_id in function_nodes: 
-        for k in range(channels): 
-            for k2 in range(channels): 
-                row.append(channels*node_id.item() + k)
-                col.append(channels*node_id.item() + k2)
+        c = channels[node_id]                                  # number of func. node channels 
+        node_id_idx0 = np.sum(channels[:node_id.item()])       # node indexing: index of the first hidden channel for a given function node 
+        for k in range(c): 
+            for k2 in range(c): 
+                row.append(node_id_idx0 + k)
+                col.append(node_id_idx0 + k2)
 
     row = torch.tensor(row, dtype=torch.float32)
     col = torch.tensor(col, dtype=torch.float32)
@@ -177,29 +246,30 @@ def get_W2_indices(function_nodes, channels):
 
 def get_W3_indices(edge_index, function_nodes, channels): 
     '''
-    # how to create node -> edge indices 
+    how to create node -> edge indices for W3
 
-    # for node_id in function_nodes 
+    Args: 
+        edge_index          torch tensor        COO edge index describing the structural graph 
+        function_nodes      torch tensor        the node index for function nodes (e.g., in_degree > 0 and out_degree > 0)
+        channels            numpy array         the number of hidden channels for each function node, indexed by node 
 
-        # filter to edges from node_id 
-        # src, dst = edge_index
-        # out_edges = (src == node_id).nonzero()
-        # for k in channels: 
-            # for out_edge_idx in out_edges: 
-                # add weight indice:   (node_id + k, out_edge_idx)
+    Returns: 
+        indices             torch tensor        COO format edge indices for W2 
     '''
     row = [] 
     col = []
     for node_id in function_nodes: 
         
-        src,dst = edge_index 
+        # get the edge ids of the function node 
+        src,_ = edge_index 
         out_edges = (src == node_id).nonzero(as_tuple=True)[0]
 
-        for k in range(channels):
-            
-            for edge_id in out_edges: 
+        c = channels[node_id]                                  # number of func. node channels 
+        node_id_idx0 = np.sum(channels[:node_id.item()])       # node indexing: index of the first hidden channel for a given function node 
 
-                row.append(channels*node_id.item() + k)
+        for k in range(c):
+            for edge_id in out_edges: 
+                row.append(node_id_idx0 + k)
                 col.append(edge_id.item())
 
     row = torch.tensor(row, dtype=torch.float32)

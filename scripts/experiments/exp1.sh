@@ -37,18 +37,17 @@ TARGETOME="--targetome_targets"
 STITCH=""
 FULL_GRN=""
 
-GSNN_TIME=24:00:00
+GSNN_TIME=1-12:00:00
 GSNN_MEM=32G
-GSNN_BATCH=25
+GSNN_BATCH=50
 GSNN_GRES=gpu:1
 
-NN_TIME=05:00:00
+NN_TIME=08:00:00
 NN_MEM=16G
 NN_BATCH=256
 
-GNN_TIME=12:00:00
+GNN_TIME=16:00:00
 GNN_MEM=32G
-GNN_GRES=gpu:1
 GNN_BATCH=25
 ###########################
 
@@ -96,8 +95,8 @@ if [ -e "$PROC/make_data_completed_successfully.flag" ]; then
 
 	echo 'submitting gnn jobs...'
 	mkdir $OUT/GNN/
-	#                                        HH:MM:SS MEM GRES  BTCH
-	./batched_gnn.sh $PROC $OUT/GNN/ $EPOCHS $GNN_TIME $GNN_MEM $GNN_GRES $GNN_BATCH
+	#                                        HH:MM:SS MEM   BTCH
+	./batched_gnn.sh $PROC $OUT/GNN/ $EPOCHS $GNN_TIME $GNN_MEM $GNN_BATCH
 else 
 	echo "make_data.py did not complete successfully. no model batch scripts submitted."
 fi

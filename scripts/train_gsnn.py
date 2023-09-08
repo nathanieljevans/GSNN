@@ -47,10 +47,10 @@ def get_args():
     parser.add_argument("--cell_agnostic", action='store_true',
                         help="if true, will set all non-drug input nodes to zero, removing all contextual information")
     
-    parser.add_argument("--channels", type=int, default=5,
+    parser.add_argument("--channels", type=int, default=3,
                         help="number of channels for each function node")
     
-    parser.add_argument("--layers", type=int, default=15,
+    parser.add_argument("--layers", type=int, default=10,
                         help="number of layers of message passing")
     
     parser.add_argument("--dropout", type=float, default=0.,
@@ -93,7 +93,13 @@ def get_args():
     parser.add_argument("--stochastic_depth", action='store_true',
                         help="whether to use the `stochastic depth` technique during training (https://arxiv.org/abs/1603.09382)")
     
-    parser.add_argument("--null_inflation", type=float, default=0.,
+    parser.add_argument("--share_layers", action='store_true',
+                        help="whether to use share function node parameters across layers.")
+    
+    parser.add_argument("--fix_hidden_channels", action='store_true',
+                        help="if true, all function nodes will have `channels` hidden units, otherwise, the number of hidden channels of each function node will depend on the function node degree (e.g., nodes with more inputs/output will have more hidden channels.).")
+    
+    parser.add_argument("--null_inflation", type=float, default=0.05,
                         help="proportion of training dataset that should be inflated with 'null' obs, e.g., zero-drug, zero-output")
     
     args = parser.parse_args()
@@ -166,7 +172,9 @@ if __name__ == '__main__':
              dropout_type=args.dropout_type,
              norm=args.norm,
              bias=~args.no_bias,
-             stochastic_depth=args.stochastic_depth).to(device)
+             stochastic_depth=args.stochastic_depth,
+             share_layers=args.share_layers,
+             fix_hidden_channels=args.fix_hidden_channels).to(device)
     
     n_params = sum([p.numel() for p in model.parameters()])
     args.n_params = n_params

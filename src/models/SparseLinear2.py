@@ -1,6 +1,6 @@
 import torch
 import torch_geometric as pyg 
-
+import numpy as np
 
 class Conv(pyg.nn.MessagePassing):
     def __init__(self):
@@ -18,22 +18,15 @@ class Conv(pyg.nn.MessagePassing):
 
 
 class SparseLinear2(torch.nn.Module): 
-    def __init__(self, indices, size, d=None, dtype=torch.float32, bias=True):
+    def __init__(self, indices, size, dtype=torch.float32, bias=True, init='kaiming'):
         '''
-        
-        We use `Kaiming` Weight Initialization, if `d` (layer dimension) is provided. Remember, each layer can be thought of as 
-        several smaller, independantly connected networks, therefore we cannot use the dimensions provided by `size`. Fortunately, 
-        we can make the assumption that each layer has the same number of independant `channels` and therefore can be initialized 
-        with the same dimension value. 
+        Sparse Linear layer, equivalent to sparse matrix multiplication as provided by indices. 
 
-        @misc{he2015delving,
-        title={Delving Deep into Rectifiers: Surpassing Human-Level Performance on ImageNet Classification}, 
-        author={Kaiming He and Xiangyu Zhang and Shaoqing Ren and Jian Sun},
-        year={2015},
-        eprint={1502.01852},
-        archivePrefix={arXiv},
-        primaryClass={cs.CV}
-}
+        Args: 
+            indices         COO coordinates for the sparse matrix multiplication 
+            size            size of weight matrix 
+            dtype           weight matrix type 
+            bias            whether to include a bias term; Wx + B
         '''
         super().__init__() 
 
@@ -42,25 +35,27 @@ class SparseLinear2(torch.nn.Module):
 
         self.conv = Conv()
 
-        _, dst = indices 
+        src, dst = indices.type(torch.long)
         values = torch.randn(indices.size(1), dtype=dtype)
 
-        # scale weight initialization
-        if d is not None: 
-            std = (2/d)**(0.5)
-            values *= std
+        # weight initialization 
+        fan_in = pyg.utils.degree(dst, num_nodes=self.M)
+        fan_out = pyg.utils.degree(src, num_nodes=self.N)
+        n_in = fan_in[dst]      # number of input units 
+        n_out = fan_out[src]    # number of output units 
+        if init == 'xavier':  # glorot
+            std = (2/(n_in + n_out))**0.5
+        elif init == 'kaiming': # he
+            std = (2/n_in)**(0.5)
+        elif init == 'normal': 
+            std = torch.ones_like(values)
+        else:
+            raise ValueError('unrecognized weight initialization method, options: xavier, kaiming, normal')
+        values *= std
 
-        # optimizers require dense parameters 
-        self.values = torch.nn.Parameter(values)
+        self.values = torch.nn.Parameter(values) # torch optimizer require dense parameters 
         self.register_buffer('indices', indices.type(torch.long))
         if bias: self.bias = torch.nn.Parameter(torch.zeros((self.M, 1), dtype=dtype))
-
-        # cache
-        self.edge_index = None 
-        self.edge_id = None 
-        self.B = None
-        self.bias_idx = None
-        self.batched_size = None
 
     def forward(self, x): 
         '''

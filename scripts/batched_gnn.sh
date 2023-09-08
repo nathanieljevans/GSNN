@@ -9,7 +9,6 @@ OUT=$2
 EPOCHS=$3
 TIME=$4
 MEM=$5
-GPU=$6
 BATCH=$7
 
 mkdir $OUT
@@ -41,10 +40,8 @@ sbatch <<EOF
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
-#SBATCH --gres=$GPU
 #SBATCH --time=$TIME
 #SBATCH --mem=$MEM
-#SBATCH --partition=gpu
 #SBATCH --output=$OUT2/log.%j.out
 #SBATCH --error=$OUT2/log.%j.err
 
