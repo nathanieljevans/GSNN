@@ -35,8 +35,9 @@ jobid=0
 # LIMITED HYPER-PARAMETER GRID SEARCH 
 for lr in 0.01 0.001; do
     for do in 0 0.1 0.25; do 
-        for c in 2 5 10; do
+        for c in 5 10; do
 	    for lay in 10 20; do
+                for fhc in "" "--fix_hidden_channels"; do
 
 jobid=$((jobid+1))
 
@@ -60,10 +61,11 @@ sbatch <<EOF
 source ~/.zshrc
 conda activate gsnn 
 cd /home/exacloud/gscratch/NGSdev/evans/GSNN/scripts/
-python train_gsnn.py --data $PROC --out $OUT --dropout_type edgewise --norm layer --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --layers $lay --fix_hidden_channels 
-python train_gsnn.py --data $PROC --out $OUT --dropout_type edgewise --norm layer --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --layers $lay --fix_hidden_channels  --randomize
+python train_gsnn.py --data $PROC --out $OUT --dropout_type edgewise --norm layer --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --layers $lay $FHC 
+python train_gsnn.py --data $PROC --out $OUT --dropout_type edgewise --norm layer --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --layers $lay $FHC --randomize
 
 EOF
+done
 done
 done
 done
