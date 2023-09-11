@@ -1,7 +1,7 @@
 #!/bin/zsh
 # example use:
-# ./batched_gnn.sh $PROC $OUT $EPOCHS $TIME $MEM $GPU $BATCH 
-# ./batched_gnn.sh ../output/exp1-1/proc/ ../output/gnn_test/ 10 00:30:00 12G gpu:1 50
+# ./batched_gnn.sh $PROC $OUT $EPOCHS $TIME $MEM $BATCH 
+# ./batched_gnn.sh ../output/exp1-1/proc/ ../output/gnn_test/ 10 00:30:00 12G 50
   
 
 PROC=$1 
@@ -9,7 +9,14 @@ OUT=$2
 EPOCHS=$3
 TIME=$4
 MEM=$5
-BATCH=$7
+BATCH=$6
+
+echo "PROC" $PROC 
+echo "OUT" $OUT 
+echo "EPOCHS" $EPOCHS
+echo "TIME" $TIME 
+echo "MEM" $MEM
+echo "BATCH" $BATCH
 
 mkdir $OUT
 
@@ -26,8 +33,9 @@ fi
 jobid=0
 for lr in 0.001; do
     for do in 0 0.25; do 
-        for c in 32 64; do
+        for c in 64 128; do
             for conv in GCN GIN GAT; do
+                for layers in 3 5 10; do
 
 
 jobid=$((jobid+1))
@@ -48,11 +56,12 @@ sbatch <<EOF
 source ~/.zshrc
 conda activate gsnn 
 cd /home/exacloud/gscratch/NGSdev/evans/GSNN/scripts/
-python train_gnn.py --data $PROC --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --gnn $conv --batch $BATCH
-python train_gnn.py --data $PROC --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --gnn $conv --batch $BATCH --randomize
+python train_gnn.py --data $PROC --out $OUT --layers $layers --dropout $do --channels $c --lr $lr --epochs $EPOCHS --gnn $conv --batch $BATCH
+python train_gnn.py --data $PROC --out $OUT --layers $layers --dropout $do --channels $c --lr $lr --epochs $EPOCHS --gnn $conv --batch $BATCH --randomize
 
 EOF
 done
 done
 done
+done 
 done 

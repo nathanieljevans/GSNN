@@ -19,7 +19,6 @@
 #       - Signaling by EGFR 
 #       
 # This experiment tests if including these downstream "linked" pathways improves the model performance relative to NN.
-# same as 12, but adding second level of dependants + ERBB2 
 ########## PARAMS #########
 
 NAME=exp1
@@ -39,15 +38,15 @@ FULL_GRN=""
 
 GSNN_TIME=1-12:00:00
 GSNN_MEM=32G
-GSNN_BATCH=50
+GSNN_BATCH=25
 GSNN_GRES=gpu:1
 
 NN_TIME=08:00:00
 NN_MEM=16G
 NN_BATCH=256
 
-GNN_TIME=16:00:00
-GNN_MEM=32G
+GNN_TIME=24:00:00
+GNN_MEM=16G
 GNN_BATCH=25
 ###########################
 
