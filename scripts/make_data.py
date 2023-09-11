@@ -77,7 +77,6 @@ def get_args():
 
 def row2obs(row, dataset, dataset_row, uni2dataset_rowidx, sigid2idx, data, node2idx, meta, omics, eps): 
     ''' 
-
     Args: 
         row         (pandas.Series)             obs data 
         dataset     (h5py Dataset object)       contains lincs level 5 expression signatures 

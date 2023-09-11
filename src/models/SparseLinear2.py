@@ -1,3 +1,7 @@
+'''
+Batched sparse matrix multiplication that scales with GPU's better. 
+'''
+
 import torch
 import torch_geometric as pyg 
 import numpy as np
