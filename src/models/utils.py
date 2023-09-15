@@ -299,20 +299,26 @@ def edge2node(x, edge_index, output_node_mask):
 
     return out
 
-def predict_gsnn(loader, model, data, device): 
+def predict_gsnn(loader, model, data, device, return_omics=False): 
 
     model = model.eval()
 
     ys = [] 
     yhats = [] 
     sig_ids = []
+
+    if return_omics: 
+        omic_nodes = [x for x in data.node_names if ('EXPR' in x) or ('CNV' in x) or ('METHYL' in x) or ('MUT' in x)]
+        omic_idxs = np.isin(data.node_names, omic_nodes).nonzero()[0]
+        x_omics = []
     
     with torch.no_grad(): 
         for i,(x, y, sig_id) in enumerate(loader): 
             print(f'progress: {i}/{len(loader)}', end='\r')
 
             yhat = model(x.to(device))[:, data.output_node_mask]
-            y = y.to(device).squeeze(-1)[:, data.output_node_mask]
+
+            if len(y.size()) > 1: y = y.to(device).squeeze(-1)[:, data.output_node_mask]
 
             yhat = yhat.detach().cpu() 
             y = y.detach().cpu()
@@ -321,10 +327,16 @@ def predict_gsnn(loader, model, data, device):
             yhats.append(yhat)
             sig_ids += sig_id
 
+            if return_omics: x_omics.append(x[:, omic_idxs])
+
     y = torch.cat(ys, dim=0).detach().cpu().numpy()
     yhat = torch.cat(yhats, dim=0).detach().cpu().numpy()
 
-    return y, yhat, sig_ids
+    if return_omics: 
+        x_omics = torch.cat(x_omics, dim=0).squeeze(-1).detach().cpu().numpy()
+        return y, yhat, x_omics, sig_ids
+    else: 
+        return y, yhat, sig_ids
 
 def predict_nn(loader, model, data, device): 
 

@@ -80,7 +80,7 @@ def get_args():
     parser.add_argument("--save_every", type=int, default=20,
                         help="saves model results and weights every X epochs")
 
-    parser.add_argument("--dropout_type", type=str, default='layerwise',
+    parser.add_argument("--dropout_type", type=str, default='edgewise',
                         help="type of dropout to perform: 'edgewise' will drop edges across all layers (e.g., same edge removed for all layers). \
                             'layerwise' will dropout unique edges from each layer. 'nodewise' will dropout all edges from a given node.")                   
     

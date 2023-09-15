@@ -20,7 +20,6 @@ from src.proc.load_methyl import load_methyl
 from src.proc.load_expr import load_expr
 from src.proc.load_cnv import load_cnv
 from src.proc.load_mut import load_mut
-from src.proc.load_prism import load_prism
 
 
 def get_args(): 
@@ -74,6 +73,71 @@ def get_args():
     parser.add_argument('--dose_trans_eps', type=float, default=1e-6, help='dose (uM) transformation to (log10(x + eps) - log10(eps))/-log10(eps). Pass -666 to use legacy "pseudo-count" style transformation.')
     
     return parser.parse_args()
+
+
+def row2obs_prism(row, data, meta, omics, eps): 
+    ''' 
+    Args: 
+        row         (pandas.Series)             obs data 
+        dataset     (h5py Dataset object)       contains lincs level 5 expression signatures 
+        N           (int)                       # of nodes in graph (input + output + function) 
+
+    Returns: 
+        dict                                    one observation data 
+    '''
+    expr, methyl, mut, cnv = omics
+
+    lincs_nodes, drug_nodes, expr_nodes, cnv_nodes, methyl_nodes, mut_nodes, N, input_nodes, output_nodes, func_nodes = meta
+
+    obs = {}
+
+    obs['conc_um']      = row.pert_dose
+    obs['sig_id']       = row.sig_id 
+    obs['cell_iname']   = row.cell_iname
+    obs['pert_id']      = row.pert_id 
+
+    # only input nodes should be nonzero 
+    # shape: (num_nodes, 1)
+    x_dict = {**{n:[0.] for n in func_nodes}, **{n:[0.] for n in drug_nodes}, **{n:[0.] for n in lincs_nodes}}
+
+    # DRUG CONCENTATION TRANSFORMATION 
+    # DEPRECATED ("pseudo-count" style transformation): x_dict['DRUG__' + obs['pert_id']] = [np.log10(obs['conc_um'] + 1)]
+    if eps == -666: 
+        # for legacy reasons, we'll keep an option for the pseudo-count style transformation    
+        x_dict['DRUG__' + obs['pert_id']] = [np.log10(obs['conc_um'] + 1)]
+    else:
+        # This transformation is linear in logspace between [np.log10(eps), inf] AND 0 uM = 0, 1 uM ~ 1. 
+        # Recommended that `eps` should be at least a few orders of magnitude smaller than the smallest concentration in the dataset  
+        x_dict['DRUG__' + obs['pert_id']] = [(np.log10(obs['conc_um'] + eps) - np.log10(eps))/(-np.log10(eps))]
+
+    # add expr inputs 
+    for node in expr_nodes: 
+        val = expr.loc[obs['cell_iname'], node.split('__')[1]]
+        x_dict[node] = [val]
+
+    # methyl inputs 
+    for node in methyl_nodes: 
+        val = methyl.loc[obs['cell_iname'], node.split('__')[1]]
+        x_dict[node] = [val]
+
+    # cnv inputs 
+    for node in cnv_nodes: 
+        val = cnv.loc[obs['cell_iname'], node.split('__')[1]]
+        x_dict[node] = [val]
+
+    # mut inputs 
+    for node in mut_nodes: 
+        val = mut.loc[obs['cell_iname'], node.split('__')[1]]
+        x_dict[node] = [val]
+    
+    x_df = pd.DataFrame(x_dict)
+    obs['x'] = torch.tensor(x_df[data.node_names].values, dtype=torch.float32).reshape(-1,1)
+
+    obs['log_fold_change'] = row.log_fold_change 
+    obs['cell_viability'] = row.cell_viab
+        
+    return obs 
+
 
 def row2obs(row, dataset, dataset_row, uni2dataset_rowidx, sigid2idx, data, node2idx, meta, omics, eps): 
     ''' 
@@ -192,6 +256,13 @@ def downstream_nodes(G, node, N, visited=None):
                 downstream.extend(downstream_nodes(G, n, N-1, visited))
 
     return downstream
+
+
+##########################################################################################
+##########################################################################################
+####################                     MAIN                         ####################
+##########################################################################################
+##########################################################################################
 
 
 if __name__ == '__main__': 
@@ -768,11 +839,18 @@ if __name__ == '__main__':
 
         torch.save(obs, f'{args.out}/obs/{obs["sig_id"]}.pt')
 
+    print('saving processed omics...')
+    expr.to_csv(args.out + '/expr.csv')
+    methyl.to_csv(args.out + '/methyl.csv')
+    mut.to_csv(args.out + '/mut.csv')
+    cnv.to_csv(args.out + '/cnv.csv')
+
     print()
     print('creating train/test/val splits...')
-
-    # hold-out cell lines 
+    
+    # meta 
     data.cellspace = cell_space
+    data.drugspace = drug_space
 
     #train_mask = np.ones((len(data.cellspace),), dtype=bool)
     test_ixs = np.random.choice(np.arange(len(data.cellspace)), size=int(len(data.cellspace)*args.test_prop))
@@ -817,10 +895,51 @@ if __name__ == '__main__':
 
     # save data obj to disk
     torch.save(data, f'{args.out}/Data.pt')
-    print('done.')
+    print('LINCS data made.')
 
     with open(f'{args.out}/make_data_completed_successfully.flag', 'w') as f: 
          f.write(':)')
+
+    ##########################################################################################
+    ##########################################################################################
+    ####################                    PRISM                         ####################
+    ##########################################################################################
+    ##########################################################################################
+
+    print('making PRISM data...')
+
+    prism = utils.load_prism(args.data, cellspace=data.cellspace, drugspace=data.drugspace)
+
+    if os.path.exists(f'{args.out}/obs_prism/'): shutil.rmtree(f'{args.out}/obs_prism/')
+    os.mkdir(f'{args.out}/obs_prism/')
+
+    for i, row in prism.iterrows(): 
+        if i%10 == 0: print(f'progress: {i}/{len(prism)}', end='\r')
+
+        obsp = row2obs_prism(row, data, meta, omics, eps=args.dose_trans_eps)
+
+        torch.save(obsp, f'{args.out}/obs_prism/{obsp["sig_id"]}.pt')
+
+    train_obs2 = prism[lambda x: x.cell_iname.isin(train_cells)].sig_id.values
+    test_obs2 = prism[lambda x: x.cell_iname.isin(test_cells)].sig_id.values
+    val_obs2 = prism[lambda x: x.cell_iname.isin(val_cells)].sig_id.values
+
+    np.save(f'{args.out}/prism_val_obs', val_obs2)
+    np.save(f'{args.out}/prism_test_obs', test_obs2)
+    np.save(f'{args.out}/prism_train_obs', train_obs2)
+
+    print('prism train/test/val splits:')
+    print(f'\ttrain: {len(train_obs2)}')
+    print(f'\tval: {len(val_obs2)}')
+    print(f'\ttest: {len(test_obs2)}')
+
+    print('PRISM data made. ')
+
+
+
+
+
+
 
 
     

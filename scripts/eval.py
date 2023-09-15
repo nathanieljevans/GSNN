@@ -94,7 +94,7 @@ if __name__ == '__main__':
     if typ in ['GAT', 'GIN', 'GCN']:
         val_dataset = dataset(root=args.data, sig_ids=val_ids, data=data)
     else: 
-        val_dataset = dataset(root=args.data, sig_ids=val_ids)
+        val_dataset = dataset(root=args.data, sig_ids=val_ids, data=data)
 
     val_loader = dataloader(val_dataset, num_workers=args.workers, batch_size=args.batch) 
 

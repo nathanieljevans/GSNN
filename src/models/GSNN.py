@@ -86,7 +86,8 @@ class GSNN(torch.nn.Module):
         x = self.nonlin(x)      # latent node activations | (B, num_nodes*channels)
         x = self.lins3[_l](x)   # edge activations        | (B, E)
 
-        if not hasattr(self, 'dropout_type'): 
+        if (not self.training) or (not hasattr(self, 'dropout_type')): 
+            # no dropout if in eval mode or for backward compatibility
             pass 
         elif self.dropout_type == 'layerwise': 
             # unique set of edges are dropped every layer. 
