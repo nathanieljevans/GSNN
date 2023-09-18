@@ -102,6 +102,9 @@ def get_args():
     parser.add_argument("--null_inflation", type=float, default=0.05,
                         help="proportion of training dataset that should be inflated with 'null' obs, e.g., zero-drug, zero-output")
     
+    parser.add_argument("--AMP", action='store_true',
+                        help="Automatic Mixed Precision; better memory footprint.")
+    
     args = parser.parse_args()
 
     # checks 
@@ -191,6 +194,8 @@ if __name__ == '__main__':
         
     siginfo = pd.read_csv(f'{args.siginfo}/siginfo_beta.txt', sep='\t', low_memory=False)
 
+    scaler = torch.cuda.amp.GradScaler(enabled=args.AMP)
+
     for epoch in range(1, args.epochs+1):
         big_tic = time.time()
         model = model.train()
@@ -202,16 +207,17 @@ if __name__ == '__main__':
             if args.cell_agnostic: x[:, omic_input_idxs] = 0.
 
             tic = time.time()
-            optim.zero_grad() 
+            optim.zero_grad(set_to_none=True) 
 
-            yhat = model(x.to(device))[:, data.output_node_mask]
-            y = y.to(device).squeeze(-1)[:, data.output_node_mask]
+            with torch.autocast(device_type=device, dtype=torch.float16, enabled=args.AMP):
+                yhat = model(x.to(device))[:, data.output_node_mask]
+                y = y.to(device).squeeze(-1)[:, data.output_node_mask]
+                loss = crit(yhat, y)
 
-            loss = crit(yhat, y)
-
-            loss.backward()
+            scaler.scale(loss).backward()
             if args.clip_grad is not None: torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
-            optim.step()
+            scaler.step(optim)
+            scaler.update()
             if scheduler is not None: scheduler.step()
 
             with torch.no_grad(): 
