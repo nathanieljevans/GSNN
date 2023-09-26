@@ -16,9 +16,18 @@ do
   # Check if the file has any content
   if [ -s "$file" ]
   then
-    echo "$file has errors. The first 10 lines of errors are:"
+    echo "##########################################################"
+    echo "##########################################################" 
+    echo "$file has errors:"
+    echo "args:"
+    file2="${file%.err}.out"
+    head -4 "$file2" | sed 's/^/\t/'
+    echo "" 
+    echo "error:" 
+    echo "" 
     head -100 "$file" | sed 's/^/\t/'
   else
+    echo "##########################################################"
     echo "$file does not have errors"
   fi
 done < <(find "$ROOT" -name 'log.*.err' -print0)
