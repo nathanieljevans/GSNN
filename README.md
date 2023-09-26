@@ -36,9 +36,13 @@ NOTE: use ```$ python <fn> --help``` to get optional command line arguments.
 
 ## Reactome Pathways Suggestions
 
-| **Reactome ID** 	| **Name**                               	| **Size** 	|
-|-----------------	|----------------------------------------	|----------	|
-| R-HSA-162582    	| Signal Transduction                    	| 2584     	|
-| R-HSA-9006934   	| Signaling by Receptor Tyrosine Kinases 	| 519      	|
-| R-HSA-5683057   	| MAPK family signaling cascades         	| 327      	|
-| R-HSA-177929    	| Signaling by EGFR                      	| 52       	|
+| **Reactome ID** 	| **Reactome Level** | **Name**                               	  | **Size** 	|
+|-----------------	|------------------- | ------------------------------------------ |------------ |
+| R-HSA-162582    	| 0                  | Signal Transduction                    	  | 2584     	|
+| R-HSA-9006934   	| 1                  | Signaling by Receptor Tyrosine Kinases 	  | 519      	|
+| R-HSA-5683057   	| 1                  | MAPK family signaling cascades         	  | 327      	|
+| R-HSA-372790      | 1                  | Signaling by GPCR                          |             | 
+| R-HSA-157118      | 1                  | Signaling by NOTCH                         |             |
+| R-HSA-195721      | 1                  | Signaling by WNT                           |             |
+| R-HSA-201681      | 2                  | TCF dependent signaling in response to WNT |             |
+| 

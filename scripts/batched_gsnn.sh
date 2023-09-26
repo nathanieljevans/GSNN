@@ -10,6 +10,7 @@ TIME=$4   # amount of time to request for the slurm job (hours); e.g., 01:00:00 
 MEM=$5    # amount of memory to request for the slurm job (GB); should be in format xG, e.g., 16G -> 16 GB 
 BATCH=$6  # batch size to use, smaller batches will use less memory, but may affect optimization results. 
 GPU=$7    # gpu to request for the slurm job; should be in format: #SBATCH "gpu:rtx2080:1" -> 1 rtx2080 GPU 
+FOLD_DIR=$8 
 
 mkdir $OUT
 
@@ -33,11 +34,11 @@ fi
 
 jobid=0
 # LIMITED HYPER-PARAMETER GRID SEARCH 
-for lr in 0.01 0.001; do
-    for do in 0 0.1; do 
-        for c in 3 5 10 do
-	    for lay in 10 15; do
-                for fhc in "" "--fix_hidden_channels"; do
+for lr in 0.01; do
+    for do in 0; do
+        for c in 20 do
+	    for lay in 20; do
+                for norm in "--init lecun --nonlin selu --norm none --wd 1e-6 --sched cosine"; do
 
 jobid=$((jobid+1))
 
@@ -61,8 +62,8 @@ sbatch <<EOF
 source ~/.zshrc
 conda activate gsnn 
 cd /home/exacloud/gscratch/NGSdev/evans/GSNN/scripts/
-python train_gsnn.py --data $PROC --out $OUT --dropout_type edgewise --norm layer --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --layers $lay $fhc 
-python train_gsnn.py --data $PROC --out $OUT --dropout_type edgewise --norm layer --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --layers $lay $fhc --randomize
+python train_gsnn.py --data $PROC --fold $FOLD_DIR --out $OUT --dropout_type neuron $norm --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --layers $lay 
+python train_gsnn.py --data $PROC --fold $FOLD_DIR --out $OUT --dropout_type neuron $norm --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --layers $lay --randomize
 
 EOF
 done

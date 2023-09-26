@@ -21,6 +21,9 @@ def get_args():
     parser.add_argument("--data", type=str, default='../processed_data/',
                         help="path to data directory")
     
+    parser.add_argument("--fold", type=str, default='../processed_data/fold/',
+                        help="path to data fold directory; must contain data splits - see `create_data_splits.py`")
+    
     parser.add_argument("--siginfo", type=str, default='../../data/',
                         help="path to siginfo directory")
     
@@ -72,7 +75,7 @@ def get_args():
     parser.add_argument("--sched", type=str, default='none',
                         help="lr scheduler [onecycle, cosine, none]")
     
-    parser.add_argument("--save_every", type=int, default=20,
+    parser.add_argument("--save_every", type=int, default=10,
                         help="saves model results and weights every X epochs")
     
     return parser.parse_args()
@@ -106,6 +109,7 @@ if __name__ == '__main__':
 
     if torch.cuda.is_available() and not args.ignore_cuda: 
         device = 'cuda'
+        for i in range(torch.cuda.device_count()): print(f'cuda device {i}: {torch.cuda.get_device_properties(i).name}')
     else: 
         device = 'cpu'
     args.device = device
@@ -113,15 +117,15 @@ if __name__ == '__main__':
 
     data = torch.load(f'{args.data}/Data.pt')
 
-    train_ids = np.load(f'{args.data}/train_obs.npy', allow_pickle=True)
+    train_ids = np.load(f'{args.fold}/train_obs.npy', allow_pickle=True)
     train_dataset = LincsDataset(root=f'{args.data}', sig_ids=train_ids, data=data)
     train_loader = DataLoader(train_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=True)
 
-    test_ids = np.load(f'{args.data}/test_obs.npy', allow_pickle=True)
+    test_ids = np.load(f'{args.fold}/test_obs.npy', allow_pickle=True)
     test_dataset = LincsDataset(root=f'{args.data}', sig_ids=test_ids, data=data)
     test_loader = DataLoader(test_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=False)
 
-    val_ids = np.load(f'{args.data}/val_obs.npy', allow_pickle=True)
+    val_ids = np.load(f'{args.fold}/val_obs.npy', allow_pickle=True)
     val_dataset = LincsDataset(root=f'{args.data}', sig_ids=val_ids, data=data)
     val_loader = DataLoader(val_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=False)
 

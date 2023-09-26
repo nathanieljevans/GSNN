@@ -1,8 +1,7 @@
 #!/bin/zsh 
 
 # example use: 
-###     $ ./exp1.sh 1
-### NOTE: the $1 value defines the name suffix, for use calling multiple exp (diff train/test/val splits) 
+###     $ ./exp1.sh
 
 # Signaling by EGFR (R-HSA-177929) 
 #     linked downstream pathways (that aren't included in `signaling by EGFR` geneset): 
@@ -19,16 +18,19 @@
 #       - Signaling by EGFR 
 #       
 # This experiment tests if including these downstream "linked" pathways improves the model performance relative to NN.
+
+# R-HSA-177929 R-HSA-1489509 R-HSA-1257604 R-HSA-5673001 R-HSA-1227986 R-HSA-109606 R-HSA-6806003 R-HSA-202131 R-HSA-6807070 R-HSA-6807070 R-HSA-5673001
 ########## PARAMS #########
 
 NAME=exp1
 PATHWAY="R-HSA-177929 R-HSA-1489509 R-HSA-1257604 R-HSA-5673001 R-HSA-1227986 R-HSA-109606 R-HSA-6806003 R-HSA-202131 R-HSA-6807070 R-HSA-6807070 R-HSA-5673001"
 DATA=../../data/
-OUT=../output/$NAME-$1/
+OUT=../output/$NAME/
 PROC=$OUT/proc/
 EPOCHS=100
+N_FOLDS=1
 
-MAKE_DATA_TIME=06:00:00
+MAKE_DATA_TIME=08:00:00
 MAKE_DATA_CPUS=8
 MAKE_DATA_MEM=32G
 FEATURE_SPACE="landmark"
@@ -48,7 +50,9 @@ NN_BATCH=256
 GNN_TIME=24:00:00
 GNN_MEM=16G
 GNN_BATCH=25
+GNN_GRES=gpu:1
 ###########################
+
 
 sbatch <<EOF
 #!/bin/zsh
@@ -78,24 +82,34 @@ rm -r $OUT
 mkdir $OUT
 mkdir $PROC
 
-#                                                                                               # Flags->
+# create processed data directory 
 python make_data.py --data $DATA --out $PROC --pathways $PATHWAY --feature_space $FEATURE_SPACE $TARGETOME $STITCH $FULL_GRN >> $PROC/make_data.out
 
 if [ -e "$PROC/make_data_completed_successfully.flag" ]; then
-	echo 'submitting gsnn jobs...'
-	mkdir $OUT/GSNN/
-	#                                          HH:MM:SS MEM BTCH GRES        
-	./batched_gsnn.sh $PROC $OUT/GSNN/ $EPOCHS $GSNN_TIME $GSNN_MEM $GSNN_BATCH $GSNN_GRES 
 
-	echo 'submitting nn jobs...'
-	mkdir $OUT/NN/
-	#                                      HH:MM:SS MEM BTCH
-	./batched_nn.sh $PROC $OUT/NN/ $EPOCHS $NN_TIME $NN_MEM $NN_BATCH
+	for FOLD in {0..$N_FOLDS}; do 
 
-	echo 'submitting gnn jobs...'
-	mkdir $OUT/GNN/
-	#                                        HH:MM:SS MEM   BTCH
-	./batched_gnn.sh $PROC $OUT/GNN/ $EPOCHS $GNN_TIME $GNN_MEM $GNN_BATCH
+		FOLD_DIR="$OUT/FOLD-$FOLD"
+		
+		python create_data_split.py --data $DATA --proc $PROC --out $FOLD_DIR
+
+		echo 'submitting gsnn jobs...'
+		mkdir $OUT/GSNN/
+		#                                          HH:MM:SS MEM BTCH GRES        
+		./batched_gsnn.sh $PROC $FOLD_DIR/GSNN/ $EPOCHS $GSNN_TIME $GSNN_MEM $GSNN_BATCH $GSNN_GRES $FOLD_DIR 
+
+		echo 'submitting nn jobs...'
+		mkdir $OUT/NN/
+		#                                      HH:MM:SS MEM BTCH
+		./batched_nn.sh $PROC $FOLD_DIR/NN/ $EPOCHS $NN_TIME $NN_MEM $NN_BATCH $FOLD_DIR 
+
+		echo 'submitting gnn jobs...'
+		mkdir $OUT/GNN/
+		#                                        HH:MM:SS MEM   BTCH
+		./batched_gnn.sh $PROC $FOLD_DIR/GNN/ $EPOCHS $GNN_TIME $GNN_MEM $GNN_BATCH $GNN_GRES $FOLD_DIR 
+
+	done 
+
 else 
 	echo "make_data.py did not complete successfully. no model batch scripts submitted."
 fi

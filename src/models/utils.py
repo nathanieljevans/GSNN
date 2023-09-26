@@ -1,6 +1,7 @@
 import torch
 import copy 
 import numpy as np
+from collections import Counter
 import os
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.metrics import r2_score
@@ -10,6 +11,87 @@ from sklearn.metrics import r2_score
 from sklearn.preprocessing import LabelBinarizer
 import torch_geometric as pyg
 from sklearn.preprocessing import minmax_scale
+
+
+def compute_sample_weights(sig_ids, max_prob_fold_diff=100):
+    """
+    Calculate the sample weights based on the joint frequency of cell lines and perturbation IDs.
+    
+    Args:
+        cell_lines (numpy.ndarray): A numpy array containing the cell line for each example.
+        pert_ids (numpy.ndarray): A numpy array containing the perturbation ID for each example.
+    
+    Returns:
+        torch.Tensor: A PyTorch tensor containing the sample weights for each example.
+    """
+
+    cell_lines, pert_ids = get_sigid_attrs(sig_ids)
+
+    # Combine cell_lines and pert_ids into pairs
+    cell_line_pert_pairs = list(zip(cell_lines, pert_ids))
+
+    # Calculate the joint frequency of each unique cell line and pert_id pair
+    pair_counts = Counter(cell_line_pert_pairs)
+    total_count = len(cell_lines)
+
+    # Calculate the inverse joint frequency and assign it as weight for each example
+    weights = np.array([total_count / pair_counts[pair] for pair in cell_line_pert_pairs], dtype=np.float32)
+
+    # Convert the weights to a PyTorch tensor
+    sample_weights = torch.from_numpy(weights)
+
+    sample_prob = sample_weights / sample_weights.sum()
+
+    clip_low = sample_prob.min()
+    clip_high = clip_low*max_prob_fold_diff
+
+    sample_prob = np.clip(sample_prob, clip_low, clip_high)
+
+    print()
+    print('Balancing training obs. sampling probabilities...')
+    print('max prob. fold change (min-max)', max_prob_fold_diff)
+    print('\tmin sample prob:', sample_prob.min())
+    print('\tmax sample prob', sample_prob.max())
+    print('\taverage sample prob', sample_prob.mean())
+    print()
+
+    return sample_prob
+
+
+def get_sigid_attrs(sig_ids):
+    """
+    Extract cell line names (cell_inames) and perturbation IDs (pert_id) from the given signature IDs (sig_ids).
+    
+    Args:
+        sig_ids (list or array-like): A list or array of signature IDs to be parsed.
+    
+    Returns:
+        tuple: A tuple containing two lists:
+            - cell_inames (list): Cell line names corresponding to the input signature IDs.
+            - pert_ids (list): Perturbation IDs corresponding to the input signature IDs.
+    """
+    cell_inames = []
+    pert_ids = []
+
+    for sig_id in sig_ids:
+        try: 
+            # MET001_N8_XH:BRD-U44432129:100:336
+
+            # Split the sig_id using '_' and ':'
+            parts = sig_id.split('_')
+            cell_iname = parts[1]
+
+            # Extract the pert_id from the second part
+            pert_id = parts[2].split(':')[1]
+
+            cell_inames.append(cell_iname)
+            pert_ids.append(pert_id)
+        except: 
+            raise ValueError(f'failed `sig_id` parse: {sig_id}')
+
+    return cell_inames, pert_ids
+
+
 
 def _get_regressed_metrics(y, yhat, sig_ids, siginfo): 
     try: 
@@ -55,11 +137,27 @@ class TBLogger():
         r_flat_test = np.corrcoef(y_test.ravel(), yhat_test.ravel())[0,1]
         r_flat_val = np.corrcoef(y_val.ravel(), yhat_val.ravel())[0,1]
 
+        # This isn't very effective and slows down the reporting 
+        # e.g., doesn't correlate any better with test set
+        #r_val_q025, r_val_q975 = bootstrap_r(y_val, yhat_val, multioutput='uniform_weighted', n=250, q_lower=0.025, q_upper=0.975)
+
+        # Question: maybe outliers are leading to skewed metrics? 
+        # use median rather than mean for a outlier-robust metric 
+        median_r_val = corr_score(y_val, yhat_val, multioutput='uniform_median')
+        median_r_test = corr_score(y_test, yhat_test, multioutput='uniform_median')
+
+        mean_r_val = corr_score(y_val, yhat_val, multioutput='uniform_weighted')
+        mean_r_test = corr_score(y_test, yhat_test, multioutput='uniform_weighted')
+
         mse_test = np.mean((y_test - yhat_test)**2)
         mse_val = np.mean((y_val - yhat_val)**2)
 
         hparam_dict = args.__dict__
-        metric_dict = {'r2_test':r2_test, 
+        metric_dict = {'median_r_val': median_r_val, 
+                       'median_r_test': median_r_test, 
+                       'mean_r_val': mean_r_val, 
+                       'mean_r_test': mean_r_test, 
+                       'r2_test':r2_test, 
                        'r2_val':r2_val, 
                        'r_flat_test':r_flat_test, 
                        'r_flat_val':r_flat_val,
@@ -135,7 +233,7 @@ def get_scheduler(optim, args, loader):
         raise ValueError(f'unrecognized lr scheduler: {args.sched}')
     
 
-def _degree_to_channels(edge_index, min_size=2, max_size=25, transform=np.sqrt, verbose=True, scale_by='in_degree', clip_degree=250): 
+def _degree_to_channels(edge_index, min_size=3, max_size=25, transform=np.sqrt, verbose=False, scale_by='degree', clip_degree=250): 
     '''
     utility function to create variable number of channels per function node, dependent on the degree of each node. 
 
@@ -176,6 +274,7 @@ def _degree_to_channels(edge_index, min_size=2, max_size=25, transform=np.sqrt, 
     scaled_channels = np.array([int(np.round(x, decimals=0)) for x in scaled_channels])                                     # ensure integers 
     scaled_channels[~func_node_mask] = 0                                                                                    # only function nodes need hidden channels; input/output nodes have no function. To ensure proper indexing, we will have a surrogate index for input/output nodes. Note: this does not impact the number of parameters. 
     if verbose: print('mean # of function node channels (scaled)', np.mean(scaled_channels[func_node_mask]))
+    
     return scaled_channels
 
 
@@ -196,10 +295,12 @@ def get_W1_indices(edge_index, channels, function_nodes, scale_by_degree=True):
         _channels           numpy array             the number of hidden channels for each node, indexed by node id; e.g., node 10 will have _channels[10] hidden channels
     '''
 
+    # channels should be of size (Num_Nodes)
     if scale_by_degree:
         _channels = _degree_to_channels(edge_index, max_size=channels)
     else: 
-        _channels = np.zeros(edge_index.size(1), dtype=int) 
+        num_nodes = torch.unique(edge_index.view(-1)).size(0)
+        _channels = np.zeros(num_nodes, dtype=int) 
         _channels[function_nodes] = channels
 
     row = []
@@ -216,6 +317,10 @@ def get_W1_indices(edge_index, channels, function_nodes, scale_by_degree=True):
     col = torch.tensor(col, dtype=torch.float32)
     indices = torch.stack((row,col), dim=0)
     return indices, _channels
+
+# create a function node latent channel function such that: 
+
+# mask = [0]
 
 
 def get_W2_indices(function_nodes, channels): 
@@ -398,6 +503,9 @@ def predict_gnn(loader, model, data, device):
     return y, yhat, sig_ids
 
 def randomize(data): 
+    '''
+    
+    '''
     print('NOTE: RANDOMIZING EDGE INDEX')
     # permute edge index 
     edge_index = copy.deepcopy(data.edge_index)
@@ -452,6 +560,8 @@ def corr_score(y, yhat, multioutput='uniform_weighted'):
 
     if multioutput == 'uniform_weighted': 
         return np.nanmean(corrs)
+    elif multioutput == 'uniform_median': 
+        return np.nanmedian(corrs)
     elif multioutput == 'raw_values': 
         return corrs
     else:
@@ -481,6 +591,31 @@ def regress_out(y, df, vars):
     y_res = y - y_vars
 
     return y_res 
+
+def bootstrap_r(y, yhat, multioutput='uniform_weighted', n=100, q_lower=0.025, q_upper=0.975): 
+    '''
+    To get a better estimate of validation performance, we compute the validation 95% confidence interval of average pearson correlation. 
+
+    Args: 
+        y               np.array            true values 
+        yhat            np.array            predicted values 
+        multioutput     str                 method to handle multioutput prediction [uniform_weighted, raw_values]
+        n               int                 number of bootstrapped samples to compute 
+        q_lower         float               lower bound quantile 
+        q_upper         float               upper bound quantile 
+
+    Returns:
+        r_low, r_up                         the lower and upper quantile of the (average) pearson correlation of y,yhat
+    '''
+    
+    r = []
+    for i in range(n): 
+        idxs = np.random.choice(np.arange(0, y.shape[0]), size=y.shape[0], replace=True)
+        r.append(corr_score(y[idxs], yhat[idxs], multioutput=multioutput))
+
+    r_low = np.quantile(np.array(r), q=q_lower)
+    r_up = np.quantile(np.array(r), q=q_upper)
+    return r_low, r_up
 
 def get_regressed_r(y, yhat, sig_ids, vars, data='../../data/', multioutput='uniform_weighted', siginfo=None): 
 

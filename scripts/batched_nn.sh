@@ -9,6 +9,7 @@ EPOCHS=$3
 TIME=$4 
 MEM=$5
 BATCH=$6
+FOLD_DIR=$7
 
 mkdir $OUT
 
@@ -23,8 +24,8 @@ fi
 
 jobid=0
 for lr in 0.01 0.001; do
-    for do in 0 0.25 0.5; do 
-        for c in 100 300 500 700; do
+    for do in 0 0.5; do 
+        for c in 100 500 1000; do
 
 jobid=$((jobid+1))
 
@@ -44,8 +45,8 @@ sbatch <<EOF
 source ~/.zshrc
 conda activate gsnn 
 cd /home/exacloud/gscratch/NGSdev/evans/GSNN/scripts/
-python train_nn.py --data $PROC --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH
-python train_nn.py --data $PROC --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --cell_agnostic
+python train_nn.py --data $PROC --fold $FOLD_DIR --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH
+python train_nn.py --data $PROC --fold $FOLD_DIR --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --cell_agnostic
 
 EOF
 done

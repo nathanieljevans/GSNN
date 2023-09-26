@@ -120,3 +120,57 @@ def load_prism(root, cellspace=None, drugspace=None, avg_replicates=True):
     prism.pert_dose = prism.pert_dose.astype(float)
 
     return prism
+
+
+
+def split_ids_by_attribute(ids, attributes, proportions):
+    '''
+    1. group `ids` by `attribute` 
+    2. order by size of attribute (# ids in attribute)
+    3. randomly select an id from each attribute group for each split until the right proportions are reached. 
+    
+    This ensures that the largest attributes will be equally represented in each split but also ensures for id splits. 
+    NOTE: If there are more attribute groups than a given split size, then the smaller attirbute groups will not be represented. 
+
+    Args: 
+        ids             listlike            ids to split; len N 
+        attributes      listlike            respective id attributes; len N 
+        proportions     listlike            number of splits and proportions to assign to each split; 
+                                            the first split group proportion may not perfectly match due to integer rounding/casting errors.
+                                            len S
+
+    Returns: 
+        splits          list of lists       groups of ids assigned to each split; len S 
+    ''' 
+    assert np.isclose(sum(proportions), 1), 'proportions do not sum to 1'
+    attributes = np.array(attributes)
+    ids = list(ids)
+    _ids = np.sort(ids)
+    attrs, cnts = np.unique(attributes, return_counts=True)
+    attrs = attrs[np.argsort(cnts)]      # ensure that the attribute groups are sorted by number of ids in each attribute. 
+    grouped_ids = [np.array(ids)[attributes == a].tolist() for a in attrs]   # cell lines grouped by attribute in sorted order; same order as attr 
+
+    n = len(ids)
+    split_sizes = [np.round(p*n) for p in proportions[1:]]
+    split_sizes = [n - sum(split_sizes)] + split_sizes 
+    split_sizes = [int(x) for x in split_sizes]
+
+    splits = [[] for i in proportions]
+
+    while len(ids) > 0: 
+        for group in grouped_ids: 
+            for split, size in zip(splits, split_sizes): 
+                if (len(split) < size) & (len(ids) > 0) & (len(group) > 0): 
+                    np.random.shuffle(group)
+                    id = group.pop()
+                    split.append(id) 
+                    ids.remove(id)
+                    
+    assert sum([len(x) for x in splits]) == n, 'union of splits are a different size than original id list'
+
+    test = [] 
+    for s in splits: 
+        test+=s 
+    assert (np.sort(test) == _ids).all(), 'splits are not unique or are missing ids'
+
+    return splits

@@ -11,7 +11,6 @@ import os
 import numpy as np
 import argparse 
 
-
 import sys 
 sys.path.append('../')
 from src.proc import utils
@@ -49,23 +48,17 @@ def get_args():
     parser.add_argument("--targetome_targets", action='store_true',
                         help="whether to include drug-targets from The Cancer Targetome (Blucher 2017) database'")
     
-    parser.add_argument("--min_prop_downstream_lincs_per_drug", type=float, default=0.5,
+    parser.add_argument("--min_prop_downstream_lincs_per_drug", type=float, default=0.25,
                         help="proportion of LINCS/output nodes that have a path from drug (e.g., predictable)")
 
     parser.add_argument("--time", type=float, default=24.,
                         help="the time point to predict expression changes for")
     
-    parser.add_argument("--min_obs_per_drug", type=int, default=5,
+    parser.add_argument("--min_obs_per_drug", type=int, default=3,
                         help="drug inclusion criteria, must have at least X observations")
     
     parser.add_argument("--min_obs_per_cell", type=int, default=10,
                         help="cell line inclusion criteria, must have at least X observations")
-
-    parser.add_argument("--test_prop", type=float, default=0.15,
-                        help="proportion of cell lines to hold-out for the test set")
-    
-    parser.add_argument("--val_prop", type=float, default=0.15,
-                        help="proportion of cell lines to hold-out for the validation set")
     
     parser.add_argument('--pathways', nargs='+', default=['R-HSA-9006934'],
                         help='Reactome pathway identifiers, gene-set will be used to create sub-graph; pass ["none"] to include full graph')
@@ -271,6 +264,13 @@ if __name__ == '__main__':
 
     args.feature_space = [x.replace('-', ' ') for x in args.feature_space]
     print('feature space', args.feature_space)
+
+    if not os.path.exists(args.out): 
+        print('making output directory...')
+        os.mkdir(args.out)
+
+    with open(f'{args.out}/args.log', 'w') as f: 
+        f.write(str(args))
 
     print('loading omnipath data...')
     dorothea = op.interactions.Dorothea().get()
@@ -798,7 +798,6 @@ if __name__ == '__main__':
 
     os.mkdir(f'{args.out}/obs/')
 
-
     sigid2idx_cp    = {sid:i for i,sid in enumerate(col_cp)}
 
     lincs_nodes = [nn for nn in data.node_names if 'LINCS__' in nn]
@@ -807,10 +806,6 @@ if __name__ == '__main__':
     cnv_nodes = [nn for nn in data.node_names if ('CNV__' in nn) & ((nn in data.node_names[data.input_node_mask.view(-1).detach().numpy()]))]
     methyl_nodes = [nn for nn in data.node_names if ('METHYL__' in nn) & ((nn in data.node_names[data.input_node_mask.view(-1).detach().numpy()]))]
     mut_nodes = [nn for nn in data.node_names if ('MUT__' in nn) & ((nn in data.node_names[data.input_node_mask.view(-1).detach().numpy()]))]
-    #expr_nodes = ['EXPR__' + x for x in expr_genes]
-    #mut_nodes = ['MUT__' + x for x in mut_genes]
-    #methyl_nodes = ['METHYL__' + x for x in methyl_genes]
-    #cnv_nodes = ['CNV__' + x for x in cnv_genes]
     
     N = len(data.node_names)
 
@@ -839,59 +834,18 @@ if __name__ == '__main__':
 
         torch.save(obs, f'{args.out}/obs/{obs["sig_id"]}.pt')
 
+    np.save(args.out + '/sig_ids', siginfo2.sig_id.values, allow_pickle=True)
+
     print('saving processed omics...')
     expr.to_csv(args.out + '/expr.csv')
     methyl.to_csv(args.out + '/methyl.csv')
     mut.to_csv(args.out + '/mut.csv')
     cnv.to_csv(args.out + '/cnv.csv')
-
-    print()
-    print('creating train/test/val splits...')
     
     # meta 
     data.cellspace = cell_space
     data.drugspace = drug_space
 
-    #train_mask = np.ones((len(data.cellspace),), dtype=bool)
-    test_ixs = np.random.choice(np.arange(len(data.cellspace)), size=int(len(data.cellspace)*args.test_prop))
-    test_mask = np.zeros((len(data.cellspace),), dtype=bool)
-    test_mask[test_ixs] = True
-
-    val_ixs = np.random.choice(np.arange(len(data.cellspace))[~test_mask], size=int(len(data.cellspace)*args.val_prop))
-    val_mask = np.zeros((len(data.cellspace),), dtype=bool)
-    val_mask[val_ixs] = True
-
-    train_mask = ~(test_mask | val_mask)
-    train_ixs = train_mask.nonzero()
-
-    train_cells = data.cellspace[train_ixs]
-    test_cells = data.cellspace[test_ixs]
-    val_cells = data.cellspace[val_ixs]
-
-    train_obs = siginfo2[lambda x: x.cell_iname.isin(train_cells)].sig_id.values
-    test_obs = siginfo2[lambda x: x.cell_iname.isin(test_cells)].sig_id.values
-    val_obs = siginfo2[lambda x: x.cell_iname.isin(val_cells)].sig_id.values
-
-    print(f'# train cell lines (# obs): {len(train_cells)} ({len(train_obs)})')
-    print(f'# test cell lines (# obs): {len(test_cells)} ({len(test_obs)})')
-    print(f'# val cell lines (# obs): {len(val_cells)} ({len(val_obs)})')
-
-    assert len(set(list(train_cells)).intersection(set(list(test_cells)))) == 0, 'train/test set share cell lines'
-    assert len(set(list(train_cells)).intersection(set(list(val_cells)))) == 0, 'train/val set share cell lines'
-    assert len(set(list(test_cells)).intersection(set(list(val_cells)))) == 0, 'val/test set share cell lines'
-
-    assert len(set(list(train_obs)).intersection(set(list(test_obs)))) == 0, 'train/test set share observations'
-    assert len(set(list(train_obs)).intersection(set(list(val_obs)))) == 0, 'train/val set share observations'
-    assert len(set(list(test_obs)).intersection(set(list(val_obs)))) == 0, 'val/test set share observations'
-
-    print('saving data...')
-    np.save(f'{args.out}/val_obs', val_obs)
-    np.save(f'{args.out}/test_obs', test_obs)
-    np.save(f'{args.out}/train_obs', train_obs)
-
-    np.save(f'{args.out}/val_cells', val_cells)
-    np.save(f'{args.out}/test_cells', test_cells)
-    np.save(f'{args.out}/train_cells', train_cells)
 
     # save data obj to disk
     torch.save(data, f'{args.out}/Data.pt')
@@ -920,18 +874,7 @@ if __name__ == '__main__':
 
         torch.save(obsp, f'{args.out}/obs_prism/{obsp["sig_id"]}.pt')
 
-    train_obs2 = prism[lambda x: x.cell_iname.isin(train_cells)].sig_id.values
-    test_obs2 = prism[lambda x: x.cell_iname.isin(test_cells)].sig_id.values
-    val_obs2 = prism[lambda x: x.cell_iname.isin(val_cells)].sig_id.values
-
-    np.save(f'{args.out}/prism_val_obs', val_obs2)
-    np.save(f'{args.out}/prism_test_obs', test_obs2)
-    np.save(f'{args.out}/prism_train_obs', train_obs2)
-
-    print('prism train/test/val splits:')
-    print(f'\ttrain: {len(train_obs2)}')
-    print(f'\tval: {len(val_obs2)}')
-    print(f'\ttest: {len(test_obs2)}')
+    np.save(args.out + '/prism_ids', prism.sig_id.values, allow_pickle=True)
 
     print('PRISM data made. ')
 

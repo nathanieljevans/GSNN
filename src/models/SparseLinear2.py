@@ -47,10 +47,12 @@ class SparseLinear2(torch.nn.Module):
         fan_out = pyg.utils.degree(src, num_nodes=self.N)
         n_in = fan_in[dst]      # number of input units 
         n_out = fan_out[src]    # number of output units 
-        if init == 'xavier':  # glorot
+        if init in ['xavier', 'glorot']:  # glorot
             std = (2/(n_in + n_out))**0.5
-        elif init == 'kaiming': # he
+        elif init in ['kaiming', 'he']: # he
             std = (2/n_in)**(0.5)
+        elif init == 'lecun': 
+            std = (1/n_in)**(0.5)
         elif init == 'normal': 
             std = torch.ones_like(values)
         else:
