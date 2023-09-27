@@ -13,7 +13,7 @@ import argparse
 import glob
 
 
-__COLS__ = ['r2_test', 'r2_val', 'r_cell_test', 'r_cell_val', 'r_drug_test', 'r_drug_val', 'r_dose_test', 'r_dose_val', 'mse_test', 'mse_val', 'r_flat_test', 'r_flat_val', 'time_elapsed', 'eval_at_epoch', 'dir_name']
+__COLS__ = ['mean_r_val', 'mean_r_test', 'median_r_val', 'median_r_test', 'r2_test', 'r2_val', 'r_cell_test', 'r_cell_val', 'r_drug_test', 'r_drug_val', 'r_dose_test', 'r_dose_val', 'mse_test', 'mse_val', 'r_flat_test', 'r_flat_val', 'time_elapsed', 'eval_at_epoch', 'dir_name']
 
 def get_results(root, exp): 
     reader = SummaryReader(root, pivot=True, extra_columns={'dir_name'})
@@ -45,15 +45,16 @@ if __name__ == '__main__':
     print(exps)
     for i, exp in enumerate(exps):
         print(f'aggregating: {exp} [{i}/{len(exps)}]') 
-        for j,model in enumerate([x for x in os.listdir(args.root + '/' + exp) if x in ['GNN','GSNN','NN']]):
-            print('\t', model, end='\r')
-            try: 
-                res.append(get_results(args.root + '/' + exp + '/' + model, exp))
-            except Exception as e: 
-                print(f'\texperiment failed: {exp}, {model}')
-                print('###'*50)
-                print(e) 
-                print('###'*50)
+        for k, fold in enumerate(os.listdir(args.root + '/' + exp)): 
+            for j,model in enumerate([x for x in os.listdir(args.root + '/' + exp + '/' + fold) if x in ['GNN','GSNN','NN']]):
+                print('\t', fold, model, end='\r')
+                try: 
+                    res.append(get_results(args.root + '/' + exp + '/' + fold + '/' + model, exp))
+                except Exception as e: 
+                    print(f'\texperiment failed: {exp}, {fold}, {model}')
+                    print('###'*50)
+                    print(e) 
+                    print('###'*50)
     print('saving results...')
     all_results = pd.concat(res, axis=0)
     # save the DataFrame to a CSV file

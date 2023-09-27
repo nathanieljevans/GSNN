@@ -21,14 +21,16 @@ do
     echo "$file has errors:"
     echo "args:"
     file2="${file%.err}.out"
-    head -4 "$file2" | sed 's/^/\t/'
+    grep "cuda device 0:" $file2
     echo "" 
     echo "error:" 
     echo "" 
     head -100 "$file" | sed 's/^/\t/'
   else
     echo "##########################################################"
-    echo "$file does not have errors"
+    echo "$file does NOT have errors"
+    file2="${file%.err}.out"
+    grep "cuda device 0:" $file2
   fi
 done < <(find "$ROOT" -name 'log.*.err' -print0)
 

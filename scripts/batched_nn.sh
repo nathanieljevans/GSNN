@@ -23,9 +23,9 @@ else
 fi
 
 jobid=0
-for lr in 0.01 0.001; do
-    for do in 0 0.5; do 
-        for c in 100 500 1000; do
+for lr in 0.001; do
+    for do in 0.5; do 
+        for c in 1000; do
 
 jobid=$((jobid+1))
 

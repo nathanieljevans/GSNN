@@ -117,15 +117,15 @@ if __name__ == '__main__':
 
     data = torch.load(f'{args.data}/Data.pt')
 
-    train_ids = np.load(f'{args.fold}/train_obs.npy', allow_pickle=True)
+    train_ids = np.load(f'{args.fold}/lincs_train_obs.npy', allow_pickle=True)
     train_dataset = LincsDataset(root=f'{args.data}', sig_ids=train_ids, data=data)
     train_loader = DataLoader(train_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=True)
 
-    test_ids = np.load(f'{args.fold}/test_obs.npy', allow_pickle=True)
+    test_ids = np.load(f'{args.fold}/lincs_test_obs.npy', allow_pickle=True)
     test_dataset = LincsDataset(root=f'{args.data}', sig_ids=test_ids, data=data)
     test_loader = DataLoader(test_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=False)
 
-    val_ids = np.load(f'{args.fold}/val_obs.npy', allow_pickle=True)
+    val_ids = np.load(f'{args.fold}/lincs_val_obs.npy', allow_pickle=True)
     val_dataset = LincsDataset(root=f'{args.data}', sig_ids=val_ids, data=data)
     val_loader = DataLoader(val_dataset, batch_size=args.batch, num_workers=args.workers, shuffle=False)
 

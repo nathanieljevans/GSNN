@@ -27,6 +27,7 @@ dependencies:
     - pip
     - rdkit
     - shap
+    - pytorch-scatter
     - pip:
         - tensorboardX
         - ipykernel
