@@ -82,7 +82,7 @@ echo 'removing out dir and making proc dir...'
 
 if [ -e "$PROC/make_data_completed_successfully.flag" ]; then
 
-	for (( FOLD=0; FOLD<=$N_FOLDS; FOLD++ )); do
+	for (( FOLD=1; FOLD<=$N_FOLDS; FOLD++ )); do
 
 		FOLD_DIR="$OUT/FOLD-\$FOLD"
 		echo "FOLD DIR: \$FOLD_DIR"
