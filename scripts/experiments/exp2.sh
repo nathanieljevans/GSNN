@@ -35,7 +35,7 @@ DATA=../../data/
 OUT=../output/$NAME-$1/
 PROC=$OUT/proc/
 EPOCHS=100
-N_FOLDS=1
+N_FOLDS=3
 
 MAKE_DATA_TIME=08:00:00
 MAKE_DATA_CPUS=8
@@ -48,34 +48,30 @@ FULL_GRN=""
 GSNN_TIME=1-12:00:00
 GSNN_MEM=32G
 GSNN_BATCH=25
-GSNN_GRES=gpu:1
+GSNN_GRES=gpu:v100:1
+# BUG: the `p100` GPUs lead to ECC errors: a40 (n=16), v100 (n=32), rtx2080 (n=32) seem to work normally. 
 
 NN_TIME=08:00:00
 NN_MEM=16G
 NN_BATCH=256
 
-GNN_TIME=24:00:00
+GNN_TIME=12:00:00
 GNN_MEM=16G
 GNN_BATCH=25
-GNN_GRES=gpu:1
+GNN_GRES=gpu:v100:1
+# BUG: the `p100` GPUs lead to incosistent ECC errors: a40 (n=16), v100 (n=32), rtx2080 (n=32) seem to work normally.
 ###########################
+
 
 sbatch <<EOF
 #!/bin/zsh
-#SBATCH --job-name=$NAME-$1
+#SBATCH --job-name=$NAME
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=$MAKE_DATA_CPUS
 #SBATCH --time=$MAKE_DATA_TIME
 #SBATCH --mem=$MAKE_DATA_MEM
-#SBATCH --output=./SLURM_OUT/$NAME-$1-%j.out
-#SBATCH --error=./SLURM_OUT/$NAME-$1-%j.err
-
-#
-# EGFR Signaling 
-# LINCS SPACE: landmark 
-# Drug Targets: CLUE + Targetome
-# extended GRN: No 
-#
+#SBATCH --output=./SLURM_OUT/$NAME-%j.out
+#SBATCH --error=./SLURM_OUT/$NAME-%j.err
 
 cd .. 
 pwd
@@ -93,26 +89,28 @@ python make_data.py --data $DATA --out $PROC --pathways $PATHWAY --feature_space
 
 if [ -e "$PROC/make_data_completed_successfully.flag" ]; then
 
-	for FOLD in {0..$N_FOLDS}; do 
+	for (( FOLD=0; FOLD<=$N_FOLDS; FOLD++ )); do
 
-		FOLD_DIR="FOLD-$FOLD"
-		
-		python create_data_split.py --data $DATA --proc $PROC --out $FOLD_DIR
+		FOLD_DIR="$OUT/FOLD-\$FOLD"
+		echo "FOLD DIR: \$FOLD_DIR"
+		mkdir \$FOLD_DIR 
+
+		python create_data_splits.py --data $DATA --proc $PROC --out \$FOLD_DIR
 
 		echo 'submitting gsnn jobs...'
-		mkdir $OUT/GSNN/
+		mkdir \$FOLD_DIR/GSNN/
 		#                                          HH:MM:SS MEM BTCH GRES        
-		./batched_gsnn.sh $PROC $FOLD_DIR/GSNN/ $EPOCHS $GSNN_TIME $GSNN_MEM $GSNN_BATCH $GSNN_GRES $FOLD_DIR 
+		./batched_gsnn.sh $PROC \$FOLD_DIR/GSNN/ $EPOCHS $GSNN_TIME $GSNN_MEM $GSNN_BATCH $GSNN_GRES \$FOLD_DIR 
 
 		echo 'submitting nn jobs...'
-		mkdir $OUT/NN/
+		mkdir \$FOLD_DIR/NN/
 		#                                      HH:MM:SS MEM BTCH
-		./batched_nn.sh $PROC $FOLD_DIR/NN/ $EPOCHS $NN_TIME $NN_MEM $NN_BATCH $FOLD_DIR 
+		./batched_nn.sh $PROC \$FOLD_DIR/NN/ $EPOCHS $NN_TIME $NN_MEM $NN_BATCH \$FOLD_DIR 
 
 		echo 'submitting gnn jobs...'
-		mkdir $OUT/GNN/
+		mkdir \$FOLD_DIR/GNN/
 		#                                        HH:MM:SS MEM   BTCH
-		./batched_gnn.sh $PROC $FOLD_DIR/GNN/ $EPOCHS $GNN_TIME $GNN_MEM $GNN_BATCH $GNN_GRES $FOLD_DIR 
+		./batched_gnn.sh $PROC \$FOLD_DIR/GNN/ $EPOCHS $GNN_TIME $GNN_MEM $GNN_BATCH $GNN_GRES \$FOLD_DIR 
 
 	done 
 

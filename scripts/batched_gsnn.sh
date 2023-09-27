@@ -34,10 +34,10 @@ fi
 
 jobid=0
 # LIMITED HYPER-PARAMETER GRID SEARCH 
-for lr in 0.01; do
-    for do in 0.1; do
-        for c in 20; do
-	    for lay in 20; do
+for lr in 0.01 0.001; do
+    for do in 0 0.25; do
+        for c in 10 20; do
+	    for lay in 10 20; do
 
 jobid=$((jobid+1))
 

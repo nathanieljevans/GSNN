@@ -28,7 +28,7 @@ DATA=../../data/
 OUT=../output/$NAME/
 PROC=$OUT/proc/
 EPOCHS=100
-N_FOLDS=10
+N_FOLDS=3
 
 MAKE_DATA_TIME=08:00:00
 MAKE_DATA_CPUS=8
@@ -65,13 +65,6 @@ sbatch <<EOF
 #SBATCH --mem=$MAKE_DATA_MEM
 #SBATCH --output=./SLURM_OUT/$NAME-%j.out
 #SBATCH --error=./SLURM_OUT/$NAME-%j.err
-
-#
-# EGFR Signaling 
-# LINCS SPACE: landmark 
-# Drug Targets: CLUE + Targetome
-# extended GRN: No 
-#
 
 cd .. 
 pwd

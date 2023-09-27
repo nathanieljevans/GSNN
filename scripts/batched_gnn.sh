@@ -34,11 +34,11 @@ else
 fi
 
 jobid=0
-for lr in 0.001; do
+for lr in 0.01 0.001; do
     for do in 0; do
-        for c in 128; do
-            for conv in GIN; do
-                for layers in 3; do
+        for c in 64 128; do
+            for conv in GCN GAT GIN; do
+                for layers in 5 10; do
 
 
 jobid=$((jobid+1))
