@@ -48,8 +48,7 @@ FULL_GRN=""
 GSNN_TIME=1-12:00:00
 GSNN_MEM=32G
 GSNN_BATCH=25
-GSNN_GRES=gpu:v100:1
-# BUG: the `p100` GPUs lead to ECC errors: a40 (n=16), v100 (n=32), rtx2080 (n=32) seem to work normally. 
+GSNN_GRES=gpu:1
 
 NN_TIME=08:00:00
 NN_MEM=16G
@@ -58,8 +57,7 @@ NN_BATCH=256
 GNN_TIME=12:00:00
 GNN_MEM=16G
 GNN_BATCH=25
-GNN_GRES=gpu:v100:1
-# BUG: the `p100` GPUs lead to incosistent ECC errors: a40 (n=16), v100 (n=32), rtx2080 (n=32) seem to work normally.
+GNN_GRES=gpu:1
 ###########################
 
 
