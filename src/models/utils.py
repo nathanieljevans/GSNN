@@ -92,7 +92,6 @@ def get_sigid_attrs(sig_ids):
     return cell_inames, pert_ids
 
 
-
 def _get_regressed_metrics(y, yhat, sig_ids, siginfo): 
     try: 
         r_cell = get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)

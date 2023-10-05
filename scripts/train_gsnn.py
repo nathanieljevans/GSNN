@@ -228,7 +228,7 @@ if __name__ == '__main__':
              nonlin=utils.get_activation(args.nonlin),
              bias=~args.no_bias,
              share_layers=args.share_layers,
-             fix_hidden_channels=args.scale_channels_by_degree,
+             fix_hidden_channels=not args.scale_channels_by_degree,
              two_layer_conv=args.two_layer_conv, 
              add_function_self_edges=args.add_function_self_edges,
              norm=args.norm,

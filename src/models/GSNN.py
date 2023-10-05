@@ -77,29 +77,33 @@ class GSNN(torch.nn.Module):
         self.residual = residual
         self.channels = channels
         self.add_function_self_edges = add_function_self_edges
+        self.fix_hidden_channels = fix_hidden_channels 
+        self.two_layer_conv = two_layer_conv
 
         function_nodes = (~(input_node_mask | output_node_mask)).nonzero(as_tuple=True)[0]
-        self.register_buffer('function_edge_mask', torch.isin(edge_index[0], function_nodes)) # edges from a function node / e.g., not an input or output edge 
-        if add_function_self_edges: edge_index = torch.cat((edge_index, torch.stack((function_nodes, function_nodes), dim=0)), dim=1) # add self-edges for all function nodes
+        if add_function_self_edges: 
+            print('Augmenting `edge index` with function node self-edges.')
+            edge_index = torch.cat((edge_index, torch.stack((function_nodes, function_nodes), dim=0)), dim=1)
         self.register_buffer('edge_index', edge_index)
-        self.E = edge_index.size(1)                             # number of edges 
-        self.N = torch.unique(edge_index.view(-1)).size(0)      # number of nodes
+        self.E = self.edge_index.size(1)                             # number of edges 
+        self.N = torch.unique(self.edge_index.view(-1)).size(0)      # number of nodes
+
+        self.register_buffer('function_edge_mask', torch.isin(edge_index[0], function_nodes)) # edges from a function node / e.g., not an input or output edge 
+        self.register_buffer('input_edge_mask', self.input_node_mask[self.edge_index[0]].type(torch.float32))
 
         self.dropout = dropout
 
         _n = 1 if self.share_layers else self.layers
-        self.ResBlocks = torch.nn.ModuleList([ResBlock(edge_index, channels, function_nodes, fix_hidden_channels, 
+        self.ResBlocks = torch.nn.ModuleList([ResBlock(self.edge_index, channels, function_nodes, fix_hidden_channels, 
                                                        bias, nonlin, residual=residual, two_layers=two_layer_conv, 
                                                        dropout=dropout, norm=norm, init=init) for i in range(_n)])
         
-        self.register_buffer('input_edge_mask', self.input_node_mask[self.edge_index[0]].type(torch.float32))
 
 
     def forward(self, x, mask=None):
         '''
         Assumes x is `node` indexed 
         ''' 
-
         x = utils.node2edge(x, self.edge_index)  # convert x to edge-indexed
         x0 = x
         for l in range(self.layers): 

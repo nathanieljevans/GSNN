@@ -7,7 +7,7 @@ import torch_scatter
 
 class GroupLayerNorm(torch.nn.Module): 
 
-    def __init__(self, channel_groups, eps=1e-5): 
+    def __init__(self, channel_groups, eps=1e-4): 
         '''
 
         Args: 
@@ -22,7 +22,7 @@ class GroupLayerNorm(torch.nn.Module):
 
     def forward(self, x): 
 
-        x = x.squeeze()
+        x = x.squeeze(-1)
 
         mean = torch_scatter.scatter_mean(x, self.channel_groups, dim=1)
         std = torch_scatter.scatter_std(x, self.channel_groups, dim=1).detach()     # BUG: introduces nan's after first gradient update if not detached 

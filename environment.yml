@@ -35,3 +35,4 @@ dependencies:
         - biopython
         - obonet
         - omnipath 
+        - adjustText
