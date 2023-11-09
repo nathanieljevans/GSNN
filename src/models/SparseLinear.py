@@ -27,6 +27,7 @@ class SparseLinear(torch.nn.Module):
         values = torch.randn(indices.size(1), dtype=dtype)
 
         # scale weight initialization
+        # DEPRECATED! 
         if d is not None: 
             std = (2/d)**(0.5)
             values *= std

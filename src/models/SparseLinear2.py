@@ -40,7 +40,6 @@ class SparseLinear2(torch.nn.Module):
         self.conv = Conv()
 
         src, dst = indices.type(torch.long)
-        values = torch.randn(indices.size(1), dtype=dtype)
 
         # weight initialization 
         fan_in = pyg.utils.degree(dst, num_nodes=self.M)
@@ -57,7 +56,10 @@ class SparseLinear2(torch.nn.Module):
             std = torch.ones_like(values)
         else:
             raise ValueError('unrecognized weight initialization method, options: xavier, kaiming, normal')
-        values *= std
+        
+        # scale normal distribution
+        values = torch.randn(indices.size(1), dtype=dtype)
+        values *= std**2 # N(mean, variance)
 
         self.values = torch.nn.Parameter(values) # torch optimizer require dense parameters 
         self.register_buffer('indices', indices.type(torch.long))

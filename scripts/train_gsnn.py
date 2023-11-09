@@ -111,7 +111,7 @@ def get_args():
     parser.add_argument("--norm", type=str, default='layer',
                         help="normalization method to use [layer, none]")
     
-    parser.add_argument("--init", type=str, default='xavier',
+    parser.add_argument("--init", type=str, default='kaiming',
                         help="weight initialization strategy: 'xavier'-or-'glorot', 'kaiming'-or-'he', 'lecun', normal'")
     
     args = parser.parse_args()

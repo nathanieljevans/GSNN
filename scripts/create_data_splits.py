@@ -145,7 +145,9 @@ if __name__ == '__main__':
     np.save(f'{args.out}/lincs_test_obs', test_obs)
     np.save(f'{args.out}/lincs_train_obs', train_obs)
 
+    ############################################################################
     # create prism splits 
+    ############################################################################
     print()
     print('creating PRISM train/test/val splits...')
     prism = utils.load_prism(args.data, cellspace=data.cellspace, drugspace=data.drugspace)
@@ -159,8 +161,7 @@ if __name__ == '__main__':
     elif args.hold_out == 'cell-drug': 
         test_obs2 = keys2sids(test_keys, prism)
         val_obs2 = keys2sids(val_keys, prism)
-
-        train_obs2 = prism[lambda x: x.sig_id.isin(test_obs2) | x.sig_id.isin(val_obs2)]
+        train_obs2 = prism[lambda x: ~x.sig_id.isin(test_obs2) | ~x.sig_id.isin(val_obs2)].sig_id.values
     else: 
         raise ValueError('unrecognized `hold_out` argument.')
 
