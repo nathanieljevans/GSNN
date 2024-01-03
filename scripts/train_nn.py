@@ -78,6 +78,9 @@ def get_args():
     parser.add_argument("--save_every", type=int, default=10,
                         help="saves model results and weights every X epochs")
     
+    parser.add_argument("--distillation", type=str, default='none',
+                        help="The path to another model to do joint learning with LINCS and knowledge distillation.")
+    
     return parser.parse_args()
     
 
@@ -141,6 +144,12 @@ if __name__ == '__main__':
                 dropout=args.dropout, 
                 nonlin=utils.get_activation(args.nonlin)).to(device)
     
+    if args.distillation != 'none': 
+        distil = True
+        teacher = torch.load(args.distillation).eval().to(device)
+    else: 
+        distil = False
+            
     n_params = sum([p.numel() for p in model.parameters()])
     args.n_params = n_params
     print('# params', n_params)
@@ -152,8 +161,9 @@ if __name__ == '__main__':
 
     siginfo = pd.read_csv(f'{args.siginfo}/siginfo_beta.txt', sep='\t', low_memory=False)
 
+    _drug_mask = torch.tensor([i for i,_ in enumerate(data.node_names) if 'DRUG__' in _], dtype=torch.long).to(device)
+
     for epoch in range(1, args.epochs+1):
-        
         big_tic = time.time()
         model = model.train()
         losses = []
@@ -166,16 +176,28 @@ if __name__ == '__main__':
             tic = time.time()
             optim.zero_grad() 
 
-            x = x[:, data.input_node_mask].to(device).squeeze(-1)
-            yhat = model(x)
+            x_ = x[:, data.input_node_mask].to(device).squeeze(-1)
+            yhat = model(x_)
             y = y.to(device).squeeze(-1)[:, data.output_node_mask]
 
             loss = crit(yhat, y)
+
+            if distil: # knowledge distillation 
+                with torch.no_grad(): 
+                    # randomly choose two drugs - and concs 
+                    x_teacher = x.to(device)
+                    x_teacher[:, _drug_mask, :] *= 0 # set current drug values to zero 
+                    drug_idxs = _drug_mask[torch.randint(0, len(_drug_mask), size=(x_teacher.size(0), 1), device=device)]  # sample new drug idxs and grab indices 
+                    drug_concs = torch.rand((x_teacher.size(0), 1, 1), device=device) # sample new drug concentration values 
+                    x_teacher[:, drug_idxs] += drug_concs      # set values - error resolved
+                    yhat_teacher = teacher(x_teacher)[:, data.output_node_mask]
+                loss += 0.1*crit(yhat, yhat_teacher)
+
             loss.backward()
             if args.clip_grad is not None: torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
             optim.step()
             if scheduler is not None: scheduler.step()
-
+                
             with torch.no_grad(): 
 
                 yhat = yhat.detach().cpu().numpy() 

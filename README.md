@@ -1,48 +1,42 @@
 # Graph Structured Neural Networks (GSNN)
 
-Nathaniel Evans 
-evansna@ohsu.edu
+<img align="right" src="./extdata/GSNN_summary.png" width="300">
+
+Author: Nathaniel Evans   
+Contact: evansna@ohsu.edu
+
+Computational modeling of perturbation biology identifies relationships between molecular elements and cellular response, and an accurate understanding of these systems will support the full realization of precision medicine. Traditional deep learning, while often accurate in predicting response, is unlikely to capture the true sequence of molecular interactions involved in the response. Our work is motivated by two assumptions: 1) Methods that encourage mechanistic prediction logic are more \textit{trustworthy}, and 2) problem-specific algorithms will outperform generic algorithms. We present an alternative to Graph Neural Networks (GNNs) termed \textit{graph structured neural networks} (GSNN), which uses cell signaling knowledge, encoded as a graph data structure, to add inductive biases to deep learning. We apply our method to perturbation biology using the LINCS L1000 dataset and literature-curated molecular interactions and demonstrate that GSNNs outperform baselines in several prediction tasks, including 1) perturbed expression, 2) cell viability of drug combinations, and 3) disease-specific drug prioritization. We also present a method called \textit{GSNNExplainer} to explain GSNN predictions in a biologically interpretable form. This work has broad application in basic biological research and pre-clinical drug prioritization. Further refinement of these methods may produce trustworthy models of drug response suitable for use as clinical decision aids.
 
 ## Getting Started
 
+Create the `conda/mamba` python environment: 
 ```bash 
 $ mamba env create -f environment.yml 
 $ conda activate gsnn 
 (gsnn) $
 ```
 
+Download the necessary raw data: 
 ```bash 
 $ ./get_data.sh /path/to/download/dir/
 ```
 
+Process and save data appropriate for modeling: 
 ```bash 
-(gsnn) $ python make_data.py --data /path/to/download/dir/ --out /path/to/processed/dir/ --pathways R-HSA-9006934 --feature_space landmark best-inferred --stitch_targets --targetome_targets
+(gsnn) $ python make_data.py --data /path/to/download/dir/ --out /path/to/processed/dir/ --pathways R-HSA-9006934 --feature_space landmark best-inferred --targetome_targets
 ```
 
+Train models: 
 ```bash 
-(gsnn) $ python train_gsnn.py --data --out /path/to/processed/dir/ --dropout 0.2 --channels 4 --lr 5e-3 --clip_grad 2
+(gsnn) $ python train_gsnn.py --data /path/to/processed/dir/ --fold /path/to/data/partitions/dir/ --out /path/to/output/ 
+
+(gsnn) $ python train_gnn.py --data /path/to/processed/dir/ --fold /path/to/data/partitions/dir/ --out /path/to/output/ 
+
+(gsnn) $ python train_nn.py --data --data /path/to/processed/dir/ --fold /path/to/data/partitions/dir/ --out /path/to/output/
 ```
 
-```bash 
-(gsnn) $ python train_gnn.py --data --out /path/to/processed/dir/
-```
+> NOTE: use ```$ python <fn> --help``` to get optional command line arguments. 
 
-```bash 
-(gsnn) $ python train_nn.py --data --out /path/to/processed/dir/
-```
+## Manuscript Figures 
 
-NOTE: use ```$ python <fn> --help``` to get optional command line arguments. 
-
-
-## Reactome Pathways Suggestions
-
-| **Reactome ID** 	| **Reactome Level** | **Name**                               	  | **Size** 	|
-|-----------------	|------------------- | ------------------------------------------ |------------ |
-| R-HSA-162582    	| 0                  | Signal Transduction                    	  | 2584     	|
-| R-HSA-9006934   	| 1                  | Signaling by Receptor Tyrosine Kinases 	  | 519      	|
-| R-HSA-5683057   	| 1                  | MAPK family signaling cascades         	  | 327      	|
-| R-HSA-372790      | 1                  | Signaling by GPCR                          |             | 
-| R-HSA-157118      | 1                  | Signaling by NOTCH                         |             |
-| R-HSA-195721      | 1                  | Signaling by WNT                           |             |
-| R-HSA-201681      | 2                  | TCF dependent signaling in response to WNT |             |
-| 
+See the `jupyter notebooks` in `./notebooks/` for the scripts used to generate all figures in manuscript. For more information, contact: evansna@ohsu.edu. 

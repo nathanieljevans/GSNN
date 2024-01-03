@@ -106,7 +106,7 @@ def adjust_label_positions(pos, labels, scale_factor=300, shift_margin=1, hy=15,
 
 
 
-def plot_explanation_graph(res, threshold=0.5, num_edges=None, save=None, figsize=(10,10), fontsize=8, node_size=25):
+def plot_explanation_graph(res, threshold=0.5, num_edges=None, save=None, figsize=(10,10), fontsize=8, node_size=25, extdata_path='../extdata/'):
 
     if threshold is not None: 
         G = nx.from_pandas_edgelist(res[lambda x: x.score > threshold], create_using=nx.DiGraph)
@@ -126,7 +126,7 @@ def plot_explanation_graph(res, threshold=0.5, num_edges=None, save=None, figsiz
     G = G.subgraph(next(iter(nx.connected_components(G.to_undirected()))))
     print('largest comp. subgraph', len(G))
 
-    uni2symb = pd.read_csv('../extdata/omnipath_uniprot2genesymb.tsv', sep='\t').set_index('From').to_dict()['To']
+    uni2symb = pd.read_csv(f'{extdata_path}/omnipath_uniprot2genesymb.tsv', sep='\t').set_index('From').to_dict()['To']
 
     pos = nx.drawing.nx_agraph.graphviz_layout(G, prog='dot')
 

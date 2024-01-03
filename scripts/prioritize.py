@@ -110,6 +110,7 @@ if __name__ == '__main__':
         drugs_to_screen = open(args.drugs_path, 'r').read().split(',')
     else: 
         drugs_to_screen = [x.split('__')[-1] for x in data.node_names if 'DRUG__' in x]
+        
     if args.verbose: print('# of drugs to screen:', len(drugs_to_screen))
     if args.verbose: print('# of cells to screen:', len(cells_to_screen))
     X, meta = make_drug_inputs(args=args, data=data, doses=args.doses, cells=cells_to_screen, drugs=drugs_to_screen, siginfo=siginfo)

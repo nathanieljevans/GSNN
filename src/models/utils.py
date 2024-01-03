@@ -11,6 +11,7 @@ from sklearn.metrics import r2_score
 from sklearn.preprocessing import LabelBinarizer
 import torch_geometric as pyg
 from sklearn.preprocessing import minmax_scale
+from scipy.stats import spearmanr
 
 
 def compute_sample_weights(sig_ids, max_prob_fold_diff=100):
@@ -531,7 +532,7 @@ def randomize(data):
 
 
 
-def corr_score(y, yhat, multioutput='uniform_weighted'): 
+def corr_score(y, yhat, multioutput='uniform_weighted', method='pearson'): 
     '''
     calculate the average pearson correlation score
 
@@ -541,6 +542,16 @@ def corr_score(y, yhat, multioutput='uniform_weighted'):
     if len(y.shape) == 1: 
         y = y.reshape(-1,1)
         yhat = yhat.reshape(-1,1)
+
+    if method == 'pearson': 
+        metric = lambda x,y: np.corrcoef(x, y)[0,1]
+    elif method == 'spearman': 
+        metric = lambda x,y: spearmanr(x,y)[0]
+    elif method == 'r2': 
+        #NOTE: hacky since r2 is not a corr. 
+        metric = lambda x,y: r2_score(x,y)
+    else:
+        raise ValueError('unrecognized metric')
 
     corrs = []
     for i in range(y.shape[1]): 
@@ -553,7 +564,7 @@ def corr_score(y, yhat, multioutput='uniform_weighted'):
             p = 0
 
         else: 
-            p = np.corrcoef(y[:, i], yhat[:, i])[0,1]
+            p = metric(y[:, i], yhat[:, i])
             
         corrs.append( p ) 
 

@@ -1,3 +1,6 @@
+# This environment should be used when running scripts `report_slurm_errors.sh` and `agg_results.sh`
+# requires use of tensorflow packages that are incompatible with pytorch and therefore must be separated. 
+
 name: gsnn_tf 
 
 channels: 

@@ -10,6 +10,29 @@ sys.path.append('../')
 from src.models.GSNN import GSNN
 from src.models.NN import NN
 
+def set_drug_concs(xx, drugs, concs, data, verbose=True): 
+    '''
+
+    args: 
+        xx      torch.tesnsor       the input vector for a GSNN model - Assumes all drug concentrations are zero. 
+        drugs   list                list of pert_id strings to set respective conc value to 
+        concs   list                list of floats to set respective drug conc value 
+        data    pyg.Data            data object to use 
+        verbose str                 verbosity 
+
+    returns: 
+        torch.tensor                the xx value with the drugs set to concs values. 
+    '''
+
+
+    for drug, conc in zip(drugs, concs): 
+        if verbose: print('setting drug conc: ', drug, conc)
+
+        drug_idx = data.node_names.tolist().index('DRUG__' + drug)
+        xx[:, drug_idx] = dose2scale(conc)
+
+    return xx.detach().clone()
+
 
 def get_base_X(cell_inames, proc, data, instinfo): 
     '''
@@ -62,7 +85,7 @@ def make_drug_inputs(args, data, drugs, cells, doses, siginfo):
 
     res = {'cell_iname':[], 'pert_id_1':[],'pert_id_2':[], 'dose_um_1':[], 'dose_um_2':[]}
     X = []
-    cell_x_dict = {cell:get_base_X([cell], args.proc, data, siginfo) for cell in data.cellspace}
+    cell_x_dict = {cell:get_base_X([cell], args.proc, data, siginfo) for cell in cells}
 
 
     # ensure all drugs are in namespace 
@@ -92,7 +115,7 @@ def make_drug_inputs(args, data, drugs, cells, doses, siginfo):
                         # to avoid multible obs per "none"
                         if pert2 == 'none': dose2 = 0.
 
-                        print(f'progress: \t{cell_iname} ({i}/{len(data.cellspace)}) \t| {pert1}={dose1:.4f} \t| {pert2}={dose2:.4f})', end='\r')
+                        print(f'progress: \t{cell_iname} ({i}/{len(cells)}) \t| {pert1}={dose1:.4f} \t| {pert2}={dose2:.4f})', end='\r')
 
                         drug_comb = set([f'{pert1}::{dose1}', f'{pert2}::{dose2}', cell_iname])
                         if drug_comb in drug_combo_list: continue  

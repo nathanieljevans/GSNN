@@ -178,7 +178,7 @@ class GSNNExplainer:
             with torch.no_grad():
                 r2 = r2_score(target[:, targets].detach().cpu().numpy().ravel(), out[:, targets].detach().cpu().numpy().ravel())
 
-            print(f'iter: {iter} | mse: {mse.item():.8f} | r2: {r2:.3f} | active edges: {mask2.sum().item()}', end='\r')
+            if self.verbose: print(f'iter: {iter} | mse: {mse.item():.8f} | r2: {r2:.3f} | active edges: {mask2.sum().item()}', end='\r')
 
         # compute explained variance
         with torch.no_grad():
@@ -190,8 +190,8 @@ class GSNNExplainer:
             full_graph_preds = target[:, targets].detach().cpu().numpy().ravel() 
             subgraph_preds = out[:, targets].detach().cpu().numpy().ravel()
             r2 = r2_score(full_graph_preds, subgraph_preds)
-            print()
-            print('Final r2 (MLE):', r2)
+            if self.verbose: print()
+            if self.verbose: print('Final r2 (MLE):', r2)
 
         # get 
         _, edge_scores = torch.nn.functional.softmax(edge_params.data, dim=0).detach().cpu().numpy()

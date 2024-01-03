@@ -100,21 +100,25 @@ class GSNN(torch.nn.Module):
         
 
 
-    def forward(self, x, mask=None, return_last_activation=False):
+    def forward(self, x, mask=None, return_last_activation=False, return_all_activations=False):
         '''
         Assumes x is `node` indexed 
         ''' 
         x = utils.node2edge(x, self.edge_index)  # convert x to edge-indexed
         x0 = x
+        if return_all_activations: activations = [x0]
         for l in range(self.layers): 
             x = self.ResBlocks[0 if self.share_layers else l](x)
             if not self.residual: x += x0
             if mask is not None: x = mask * x
+            if return_all_activations: activations.append(x)
 
         if self.residual: x /= self.layers
 
         if return_last_activation: 
             return x
+        elif return_all_activations: 
+            return torch.cat(activations, dim=-1)
         else: 
             return utils.edge2node(x, self.edge_index, self.output_node_mask)  # convert x from edge-indexed to node-indexed
 

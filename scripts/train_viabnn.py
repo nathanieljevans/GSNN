@@ -7,7 +7,7 @@ lead to better performing models.
 example usage: 
 
 ```
-(gsnn) $ python train_viabnn.py --exp ../output/exp1-na/ --uid GSNN1/93e89891-a363-44fa-9bd9-8ea067b04130 --model model-45.pt
+(gsnn) $ python train_viabnn.py --data ../../output/ --proc ../output/SignalTransduction/proc/ --fold ../output/SignalTransduction/FOLD-1/ --model_dir ../output/SignalTransduction/FOLD-1/GSNN/c82456f4-6c84-4100-a83a-5d6d6d80b94d --model_name model-100.pt
 ```
 
 The resulting `ViabPredictor` model takes pertrubed expression as input (outputs of the GSNN model) and predicts cell viability or log-fold change (depending on user choice). 
@@ -33,6 +33,7 @@ from src.uncertainty.NNEnsemble import NNEnsemble
 
 from src.uncertainty.DistNN import DistNN
 from src.uncertainty.utils import root_mean_squared_picp_error
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 
 def get_args(): 
