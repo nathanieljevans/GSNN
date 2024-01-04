@@ -1,10 +1,7 @@
 #!/bin/zsh 
 
 # example use: 
-###     $ ./exp3.sh 1
-### NOTE: the $1 value defines the name suffix, for use calling multiple exp (diff train/test/val splits) 
-
-# (NOTE: limit to depth of 3)
+###     $ ./exp3.sh
 
 # Signaling by ALK: R-HSA-201556
 # 		PIP3 activates AKT signaling: R-HSA-1257604

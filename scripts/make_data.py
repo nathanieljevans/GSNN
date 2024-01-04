@@ -65,11 +65,13 @@ def get_args():
     
     parser.add_argument('--dose_trans_eps', type=float, default=1e-6, help='dose (uM) transformation to (log10(x + eps) - log10(eps))/-log10(eps). Pass -666 to use legacy "pseudo-count" style transformation.')
     
+    args = parser.parse_args() 
+    
     for f in args.feature_space: 
         if f not in ['landmark', 'best-inferred', 'inferred']: 
             raise ValueError(f'unrecognized feature space value: {f} [expects one of: landmark, best-inferred, inferred]')
 
-    return parser.parse_args()
+    return args 
 
 
 def row2obs_prism(row, data, meta, omics, eps): 
