@@ -25,10 +25,10 @@
 NAME=exp1
 PATHWAY="R-HSA-177929 R-HSA-1489509 R-HSA-1257604 R-HSA-5673001 R-HSA-1227986 R-HSA-109606 R-HSA-6806003 R-HSA-202131 R-HSA-6807070 R-HSA-6807070 R-HSA-5673001"
 DATA=../../data/
-OUT=../output/$NAME/
+OUT=../output_01_04_24/$NAME/
 PROC=$OUT/proc/
 EPOCHS=100
-N_FOLDS=3
+N_FOLDS=10
 
 MAKE_DATA_TIME=08:00:00
 MAKE_DATA_CPUS=8
@@ -43,16 +43,15 @@ GSNN_MEM=32G
 GSNN_BATCH=25
 GSNN_GRES=gpu:1
 
-NN_TIME=08:00:00
-NN_MEM=16G
+NN_TIME=12:00:00
+NN_MEM=20G
 NN_BATCH=256
 
-GNN_TIME=12:00:00
-GNN_MEM=16G
+GNN_TIME=24:00:00
+GNN_MEM=20G
 GNN_BATCH=25
 GNN_GRES=gpu:1
 ###########################
-
 
 sbatch <<EOF
 #!/bin/zsh
@@ -71,15 +70,17 @@ source ~/.zshrc
 conda activate gsnn 
 
 echo 'removing out dir and making proc dir...'
-#rm -r $OUT
-#mkdir $OUT
-#mkdir $PROC
+# NOTE: comment these out if you are running additional folds with the same data. 
+rm -r $OUT
+mkdir $OUT
+mkdir $PROC
 
 # create processed data directory 
-#python make_data.py --data $DATA --out $PROC --pathways $PATHWAY --feature_space $FEATURE_SPACE $TARGETOME $STITCH $FULL_GRN >> $PROC/make_data.out
+python make_data.py --data $DATA --out $PROC --pathways $PATHWAY --feature_space $FEATURE_SPACE $TARGETOME $STITCH $FULL_GRN >> $PROC/make_data.out
 
 if [ -e "$PROC/make_data_completed_successfully.flag" ]; then
 
+	# NOTE: adjust "FOLD" value if adding additional folds to dataset to prevent overwriting 
 	for (( FOLD=1; FOLD<=$N_FOLDS; FOLD++ )); do
 
 		FOLD_DIR="$OUT/FOLD-\$FOLD"
@@ -87,7 +88,7 @@ if [ -e "$PROC/make_data_completed_successfully.flag" ]; then
 		mkdir \$FOLD_DIR 
 
 		# NOTE: comment this out to add new runs to the same folds. 
-		#python create_data_splits.py --data $DATA --proc $PROC --out \$FOLD_DIR
+		python create_data_splits.py --data $DATA --proc $PROC --out \$FOLD_DIR
 
 		echo 'submitting gsnn jobs...'
 		mkdir \$FOLD_DIR/GSNN/
@@ -97,12 +98,12 @@ if [ -e "$PROC/make_data_completed_successfully.flag" ]; then
 		echo 'submitting nn jobs...'
 		mkdir \$FOLD_DIR/NN/
 		#                                      HH:MM:SS MEM BTCH
-		#./batched_nn.sh $PROC \$FOLD_DIR/NN/ $EPOCHS $NN_TIME $NN_MEM $NN_BATCH \$FOLD_DIR 
+		./batched_nn.sh $PROC \$FOLD_DIR/NN/ $EPOCHS $NN_TIME $NN_MEM $NN_BATCH \$FOLD_DIR 
 
 		echo 'submitting gnn jobs...'
 		mkdir \$FOLD_DIR/GNN/
 		#                                        HH:MM:SS MEM   BTCH
-		#./batched_gnn.sh $PROC \$FOLD_DIR/GNN/ $EPOCHS $GNN_TIME $GNN_MEM $GNN_BATCH $GNN_GRES \$FOLD_DIR 
+		./batched_gnn.sh $PROC \$FOLD_DIR/GNN/ $EPOCHS $GNN_TIME $GNN_MEM $GNN_BATCH $GNN_GRES \$FOLD_DIR 
 
 	done 
 

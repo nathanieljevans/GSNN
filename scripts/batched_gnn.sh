@@ -35,7 +35,7 @@ fi
 
 jobid=0
 for lr in 0.01 0.001; do
-    for do in 0; do
+    for do in 0 0.1; do
         for c in 64 128; do
             for conv in GCN GAT GIN; do
                 for layers in 5 10; do

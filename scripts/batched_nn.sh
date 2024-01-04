@@ -24,12 +24,13 @@ fi
 
 jobid=0
 for lr in 0.01 0.001; do
-    for do in 0 0.25 0.5; do 
+    for do in 0 0.1; do 
         for c in 100 500 1000; do
+            for lay in 2 4; do
 
 jobid=$((jobid+1))
 
-echo "submitting job: nn (lr=$lr, do=$do, c=$c)"
+echo "submitting job: nn (lr=$lr, do=$do, c=$c, layers=$lay)"
 
 sbatch <<EOF
 #!/bin/bash
@@ -45,10 +46,11 @@ sbatch <<EOF
 source ~/.zshrc
 conda activate gsnn 
 cd /home/exacloud/gscratch/NGSdev/evans/GSNN/scripts/
-python train_nn.py --data $PROC --fold $FOLD_DIR --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH
-python train_nn.py --data $PROC --fold $FOLD_DIR --out $OUT --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --cell_agnostic
+python train_nn.py --data $PROC --fold $FOLD_DIR --out $OUT --layers $lay --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH
+python train_nn.py --data $PROC --fold $FOLD_DIR --out $OUT --layers $lay --dropout $do --channels $c --lr $lr --epochs $EPOCHS --batch $BATCH --cell_agnostic
 
 EOF
+done
 done
 done
 done

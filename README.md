@@ -1,6 +1,6 @@
 # Graph Structured Neural Networks (GSNN)
 
-<img align="right" src="./extdata/GSNN_summary.png" width="300">
+<img align="right" src="./extdata/GSNN_summary.png" width="350">
 
 Author: Nathaniel Evans   
 Contact: evansna@ohsu.edu
