@@ -9,6 +9,7 @@ Computational modeling of perturbation biology identifies relationships between 
 
 ## Citation 
 
+```
 @article {Evans2024.02.28.582164,
 	author = {Nathaniel J. Evans and Gordon B. Mills and Guanming Wu and Xubo Song and Shannon McWeeney},
 	title = {Graph Structured Neural Networks for Perturbation Biology},
@@ -20,6 +21,7 @@ Computational modeling of perturbation biology identifies relationships between 
 	eprint = {https://www.biorxiv.org/content/early/2024/02/29/2024.02.28.582164.full.pdf},
 	journal = {bioRxiv}
 }
+```
 
 ## Getting Started
 
