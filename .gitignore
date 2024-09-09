@@ -1,5 +1,7 @@
 /processed_data/
+/data/
 /src/deprecated/
 /output/
 scripts/experiments/SLURM_OUT/
 *.pyc
+/GSNN.egg-info/

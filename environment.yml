@@ -3,22 +3,20 @@
 name: gsnn
 
 channels: 
-    - defaults 
     - pytorch 
     - nvidia 
-    - conda-forge
     - pyg
+    - conda-forge
     - mcs07
+    - defaults 
 
 dependencies:
-    - python=3.10
+    - python=3.12
     - matplotlib
     - pubchempy
     - pyg
-    - pytorch::pytorch=2.0
-    - pytorch::torchvision
-    - pytorch::torchaudio
-    - pytorch-cuda=11.7
+    - pytorch
+    - pytorch-cuda
     - seaborn
     - scikit-learn
     - h5py
@@ -26,10 +24,10 @@ dependencies:
     - tensorboard
     - shapely
     - statsmodels
-    - pip
     - rdkit
     - shap
-    - pytorch-scatter
+    - pip
+    - pyro
     - pip:
         - tensorboardX
         - ipykernel
@@ -38,3 +36,6 @@ dependencies:
         - obonet
         - omnipath 
         - adjustText
+        - torch-sparse 
+        - torch-scatter
+        - torch-cluster
