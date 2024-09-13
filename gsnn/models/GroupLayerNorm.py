@@ -4,9 +4,6 @@ Applies 1d layer normalization within each provided channel groups.
 
 import torch 
 import torch_geometric as pyg
-#import torch_scatter 
-
-# NOTE: for deep smGSNNs (layers > 15), eps needs to be adjusted lower to avoid nans during training; eps=1e-2 usually works.
 
 class GroupLayerNorm(torch.nn.Module): 
 
@@ -22,6 +19,7 @@ class GroupLayerNorm(torch.nn.Module):
         super().__init__()
 
         self.register_buffer('channel_groups', torch.tensor(channel_groups, dtype=torch.long))
+        self.register_buffer('n_channels', torch.unique(self.channel_groups, return_counts=True)[1])
 
         self.eps = eps
 
@@ -35,15 +33,14 @@ class GroupLayerNorm(torch.nn.Module):
         x = x.squeeze(-1)
 
         mean = pyg.utils.scatter(x, self.channel_groups, dim=1, reduce='mean')
-        std = pyg.utils.scatter((x - mean[:, self.channel_groups])**2, self.channel_groups, dim=1, reduce='mean')**(0.5)
-        
+        std = (pyg.utils.scatter((x - mean[:, self.channel_groups])**2, self.channel_groups, dim=1, reduce='sum') / (self.n_channels-1))**0.5
         mean = mean.detach()
-        std = std.detach() + self.eps   # BUG: introduces nan's after first gradient update if not detached 
+        std = std.detach()    # BUG: introduces nan's after first gradient update if not detached 
 
         expanded_mean = mean.index_select(1, self.channel_groups)
         expanded_std = std.index_select(1, self.channel_groups)
 
-        x = (x - expanded_mean) / (expanded_std)
+        x = (x - expanded_mean) / (expanded_std + self.eps)
 
         if hasattr(self, 'gamma'): 
             x = x*self.gamma[self.channel_groups].unsqueeze(0) + self.beta[self.channel_groups].unsqueeze(0)

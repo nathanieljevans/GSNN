@@ -6,7 +6,8 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.metrics import r2_score
 import pandas as pd
-from sklearn.linear_model import SGDRegressor #LinearRegression
+from sklearn.linear_model import SGDRegressor, LinearRegression
+from sklearn.multioutput import MultiOutputRegressor
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import LabelBinarizer
 import torch_geometric as pyg
@@ -93,19 +94,22 @@ def get_sigid_attrs(sig_ids):
     return cell_inames, pert_ids
 
 
-def _get_regressed_metrics(y, yhat, sig_ids, siginfo): 
+def _get_regressed_metrics(y, yhat, sig_ids, siginfo, ignore_errors=False): 
     try: 
         r_cell = get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
     except: 
         r_cell = -666
+        if not ignore_errors: raise
     try:
         r_drug = get_regressed_r(y, yhat, sig_ids, vars=['cell_iname', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
     except: 
         r_drug = -666
+        if not ignore_errors: raise
     try: 
         r_dose = get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'cell_iname'], multioutput='uniform_weighted', siginfo=siginfo)
     except: 
         r_dose = -666
+        if not ignore_errors: raise
     return r_cell, r_drug, r_dose
 
 class TBLogger():
@@ -434,7 +438,7 @@ def predict_gsnn(loader, model, device, verbose=True):
 
     return y, yhat, sig_ids
 
-def predict_nn(loader, model, data, device): 
+def predict_nn(loader, model, device, verbose=True): 
 
     model = model.eval()
 
@@ -444,11 +448,11 @@ def predict_nn(loader, model, data, device):
     
     with torch.no_grad(): 
         for i,(x, y, sig_id) in enumerate(loader): 
-            print(f'progress: {i}/{len(loader)}', end='\r')
+            if verbose: print(f'progress: {i}/{len(loader)}', end='\r')
 
-            x = x[:, data.input_node_mask].to(device).squeeze(-1)
+            x = x.to(device).squeeze(-1)
             yhat = model(x)
-            y = y.to(device).squeeze(-1)[:, data.output_node_mask]
+            y = y.to(device).squeeze(-1)
 
             yhat = yhat.detach().cpu() 
             y = y.detach().cpu()
@@ -462,7 +466,7 @@ def predict_nn(loader, model, data, device):
 
     return y, yhat, sig_ids
 
-def predict_gnn(loader, model, data, device): 
+def predict_gnn(loader, model, device, verbose=True): 
 
     model = model.eval()
 
@@ -472,7 +476,8 @@ def predict_gnn(loader, model, data, device):
     
     with torch.no_grad(): 
         for i,(batch) in enumerate(loader): 
-
+            if verbose: print(f'progress: {i}/{len(loader)}', end='\r')
+            
             yhat = model(edge_index=batch.edge_index.to(device), x=batch.x.to(device))
             
             #  select output nodes
@@ -574,17 +579,19 @@ def regress_out(y, df, vars):
     outputs 
         numpy array     augmented y signal 
     ''' 
-    y = y.ravel()
+    if y.shape[1] == 1: y = y.ravel()
+
     str_vars = df[vars].astype(str).agg('__'.join, axis=1)
 
     lb = LabelBinarizer() 
     one_hot_vars = lb.fit_transform(str_vars)
 
-    reg = SGDRegressor()
+    #reg = MultiOutputRegressor(SGDRegressor())
+    reg = LinearRegression()
     reg.fit(one_hot_vars, y)
 
     y_vars = reg.predict(one_hot_vars)
-    y_res = y - y_vars.ravel()
+    y_res = y - y_vars
 
     return y_res 
 

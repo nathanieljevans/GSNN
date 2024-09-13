@@ -34,7 +34,7 @@ def clip_loss(old_policy, new_policy, action, reward_scaled, clip_param=0.2):
 
     return clip_loss
 
-def update_actor(args, actor, x, reward_scaled, old_logits, action, optim, iters=4, clip_param=0.2):
+def update_actor(args, actor, x, reward_scaled, old_logits, action, optim, iter, iters=4, clip_param=0.2, target_kl=0.01):
     """
     Train the actor using PPO with clipping.
 
@@ -52,17 +52,26 @@ def update_actor(args, actor, x, reward_scaled, old_logits, action, optim, iters
     - None
     """
     old_policy = Bernoulli(logits=old_logits.detach())
-    for _ in range(iters):
+
+    entropy_decay = args.entropy/(args.outer_iters/2) # decay entropy linearly to zero in half the total iters 
+    for ii in range(iters):
         optim.zero_grad()
 
         # 1. Recompute new logits from the current policy (after updates)
         new_logits = actor(x).squeeze()
         new_policy = Bernoulli(logits=new_logits)
 
+        # early stopping reccommended by openai spinning up: https://spinningup.openai.com/en/latest/algorithms/ppo.html 
+        if torch.distributions.kl.kl_divergence(new_policy, old_policy).mean() > target_kl: 
+            #print('early stopping at ppo iter: ', ii)
+            break
+
+        entropy_coef = max((args.entropy - iter*entropy_decay), 0)
+
         # 2. Compute the clipped PPO loss
         loss = clip_loss(old_policy, new_policy, action, reward_scaled, clip_param=clip_param) \
                     + args.l1_penalty*new_logits.mean() \
-                    + args.entropy*new_policy.entropy().mean()
+                    - entropy_coef*new_policy.entropy().mean()
 
         # 3. Backpropagate the loss and update the policy
         loss.backward()

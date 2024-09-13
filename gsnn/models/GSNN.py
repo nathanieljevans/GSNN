@@ -1,12 +1,13 @@
 import torch 
-import numpy as np 
-#from src.models.SparseLinear import SparseLinear
-from gsnn.models.SparseLinear import SparseLinear2 as SparseLinear
 from gsnn.models import utils
-from gsnn.models.GroupLayerNorm import GroupLayerNorm
-import time 
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.autograd import Variable
+import torch_geometric as pyg
+import numpy as np
+from gsnn.models.ResBlock import ResBlock
+import networkx as nx
+from gsnn.proc.subset import subset_graph
+
 
 def get_conv_indices(edge_index, channels, function_nodes, fix_hidden_channels): 
     E = edge_index.size(1)  
@@ -22,65 +23,7 @@ def get_conv_indices(edge_index, channels, function_nodes, fix_hidden_channels):
         for i in range(c): 
             channel_groups.append(node_id)
 
-    return w1_indices, w2_indices, w3_indices, w1_size, w2_size, w3_size, channel_groups
-
-
-class ResBlock(torch.nn.Module): 
-
-    def __init__(self, edge_index, channels, function_nodes, fix_hidden_channels, bias, nonlin, residual, two_layers, fix_inputs=True, dropout=0., norm='layer', init='xavier'): 
-        super().__init__()
-        assert norm in ['layer', 'none'], 'unrecognized `norm` type'
-        
-        w1_indices, w2_indices, w3_indices, w1_size, w2_size, w3_size, channel_groups = get_conv_indices(edge_index, channels, function_nodes, fix_hidden_channels)
-        
-        self.two_layers = two_layers
-        self.dropout = dropout
-        self.residual = residual
-        self.fix_inputs = fix_inputs
-
-        self.lin1 = SparseLinear(indices=w1_indices, size=w1_size, bias=bias, init=init)
-        if norm == 'layer': self.norm1 = GroupLayerNorm(channel_groups)
-        if two_layers: 
-            self.lin2 = SparseLinear(indices=w2_indices, size=w2_size, bias=bias)
-            if norm == 'layer':self.norm2 = GroupLayerNorm(channel_groups)
-        self.lin3 = SparseLinear(indices=w3_indices, size=w3_size, bias=bias, init=init)
-
-        self.nonlin = nonlin()
-        self.mask = None 
-        self.x0 = None 
-
-    def set_x0(self, x0):
-        self.x0 = x0
-
-    def set_mask(self, mask): 
-        self.mask = mask
-
-    def forward(self, x): 
-
-        out = self.lin1(x)      
-        if hasattr(self, 'norm1'): out = self.norm1(out)
-        out = self.nonlin(out)  
-        out = torch.nn.functional.dropout(out, p=self.dropout, training=self.training)
-
-        if self.two_layers: 
-            out = self.lin2(out) 
-            if hasattr(self, 'norm2'): out = self.norm2(out)
-            out = self.nonlin(out)  
-            out = torch.nn.functional.dropout(out, p=self.dropout, training=self.training)
-
-        out = self.lin3(out) 
-
-        if self.residual: 
-            out = out.squeeze(-1) + x
-        else: 
-            if self.fix_inputs: 
-                out = out.squeeze(-1) + self.x0
-            else: 
-                out = out.squeeze(-1)
-        
-        if self.mask is not None: x = self.mask * x
-
-        return out
+    return (w1_indices, w2_indices, w3_indices, w1_size, w2_size, w3_size, channel_groups)
     
 def hetero2homo(edge_index_dict, node_names_dict): 
 
@@ -112,11 +55,106 @@ def hetero2homo(edge_index_dict, node_names_dict):
 
     return edge_index, input_node_mask, output_node_mask, num_nodes 
 
+def batch_graphs(N, M, edge_index, B, device, edge_mask=None):
+    '''
+    Create batched edge_index/edge_weight tensors for bipartite graphs.
+
+    Args:
+        N (int): Size of the first set of nodes in each bipartite graph.
+        M (int): Size of the second set of nodes in each bipartite graph.
+        edge_index (tensor): edge index tensor to batch.
+        B (int) batch size
+        device (str)
+
+    Returns:
+        torch.Tensor: Batched edge index.
+    '''
+    E = edge_index.size(1)
+    batched_edge_indices = edge_index.repeat(1, B).contiguous()
+    batch_idx = torch.repeat_interleave(torch.arange(B, dtype=torch.long, device=device), E).contiguous()
+
+    if edge_mask is not None: 
+        ## this batching process takes much longer
+        edge_subset = torch.cat([mask + E*i for i,mask in enumerate(edge_mask)], dim=-1) # this takes most of the time
+        batched_edge_indices = batched_edge_indices[:, edge_subset]
+        batch_idx = batch_idx[edge_subset]
+    else: 
+        edge_subset=None
+
+    src_incr = batch_idx*N
+    dst_incr = batch_idx*M
+    incr = torch.stack((src_incr, dst_incr), dim=0)
+    batched_edge_indices += incr
+
+    return batched_edge_indices, edge_subset
+
+def get_edge_masks(subgraph_dict, node_names_dict, edge_index, two_layers, indices_params): 
+        
+    N = len(node_names_dict['input']) + len(node_names_dict['function']) + len(node_names_dict['output'])  
+    w1_indices, w2_indices, w3_indices, w1_size, w2_size, w3_size, channel_groups = indices_params
+
+    subgraph_dict_ = {}
+    i = 0
+    for var, (inp, func, out) in subgraph_dict.items(): 
+        i+=1
+        print(f'initializing subgraph indexing [part 1/2]: {i}/{len(subgraph_dict)}', end='\r')
+        # convert to homo indexing 
+        subset = torch.cat((inp + len(node_names_dict['function']),
+                                func, 
+                                out + len(node_names_dict['function']) + len(node_names_dict['input'])), dim=-1) 
+        _,_,edge_mask = pyg.utils.subgraph(subset=subset, 
+                                        edge_index=edge_index, 
+                                        relabel_nodes=False, 
+                                        num_nodes=N, 
+                                        return_edge_mask=True)
+        subgraph_dict_[var] = edge_mask
+    print()
+
+    subgraph_dict = subgraph_dict_
+
+    # convert subgraph dict (var->subedges) to (var->edge_mask); one for each lin layer 
+    # input edges are edge indexed (not node indexed)
+
+    # build graph
+    G = nx.DiGraph()
+    # add 
+    G.add_edges_from(['E__'+str(int(i.item())), 'C1__' + str(int(j.item()))] for i,j in zip(*w1_indices))
+    if two_layers: 
+        G.add_edges_from(['C1__'+str(int(i.item())), 'C2__' + str(int(j.item()))] for i,j in zip(*w2_indices))
+        G.add_edges_from(['C2__'+str(int(i.item())), 'E__' + str(int(j.item()))] for i,j in zip(*w3_indices))
+    else: 
+        G.add_edges_from(['C1__'+str(int(i.item())), 'E__' + str(int(j.item()))] for i,j in zip(*w3_indices))
+
+    depth = 3 if two_layers else 2
+
+    # lin1 
+    lin1_edge_mask_dict={}
+    lin2_edge_mask_dict={}
+    lin3_edge_mask_dict={}
+    i=0
+    distance_dicts=({},{})
+    for var, edges in subgraph_dict.items(): 
+        i+=1
+        print(f'initializing subgraph indexing [part 2/2]: {i}/{len(subgraph_dict)}', end='\r')
+        edges = edges.nonzero(as_tuple=True)[0].detach().cpu().numpy().tolist() # convert from mask to edge idxs 
+        roots = leafs = ['E__' + str(x) for x in edges]
+        sG, distance_dicts = subset_graph(G, depth=depth, roots=roots, leafs=leafs, verbose=True, distance_dicts=distance_dicts, return_dicts=True)
+
+        lin1_edge_mask_dict[var] = torch.tensor([sG.has_edge('E__'+str(int(i)), 'C1__' + str(int(j))) for (i,j) in zip(*w1_indices)], dtype=torch.bool).nonzero(as_tuple=True)[0]
+        if two_layers: 
+            lin2_edge_mask_dict[var] = torch.tensor([sG.has_edge('C1__'+str(int(i)), 'C2__' + str(int(j))) for (i,j) in zip(*w2_indices)], dtype=torch.bool).nonzero(as_tuple=True)[0]
+            lin3_edge_mask_dict[var] = torch.tensor([sG.has_edge('C2__'+str(int(i)), 'E__' + str(int(j))) for (i,j) in zip(*w3_indices)], dtype=torch.bool).nonzero(as_tuple=True)[0]
+        else: 
+            lin3_edge_mask_dict[var] = torch.tensor([sG.has_edge('C1__'+str(int(i)), 'E__' + str(int(j))) for (i,j) in zip(*w3_indices)], dtype=torch.bool).nonzero(as_tuple=True)[0]
+    print()
+    return lin1_edge_mask_dict, lin2_edge_mask_dict, lin3_edge_mask_dict
+
 class GSNN(torch.nn.Module): 
 
     def __init__(self, edge_index_dict, node_names_dict, channels, layers, residual=True, dropout=0., 
                             nonlin=torch.nn.GELU, bias=True, share_layers=True, fix_hidden_channels=True, two_layer_conv=False, 
-                                add_function_self_edges=False, norm='layer', init='kaiming', verbose=False, edge_channels=1, checkpoint=False, fix_inputs=True):
+                                add_function_self_edges=False, norm='layer', init='kaiming', verbose=False, edge_channels=1, checkpoint=False,
+                                  fix_inputs=True, dropout_type='node', subgraph_dict=None):
         super().__init__()
 
         # add multiple latent edge features per edge
@@ -138,6 +176,7 @@ class GSNN(torch.nn.Module):
         self.edge_channels = edge_channels
         self.checkpoint = checkpoint
         self.fix_inputs = fix_inputs
+        self.dropout_type = dropout_type
 
         function_nodes = (~(input_node_mask | output_node_mask)).nonzero(as_tuple=True)[0]
         if add_function_self_edges: 
@@ -145,19 +184,73 @@ class GSNN(torch.nn.Module):
             edge_index = torch.cat((edge_index, torch.stack((function_nodes, function_nodes), dim=0)), dim=1)
         self.register_buffer('edge_index', edge_index)
         self.E = self.edge_index.size(1)                             # number of edges 
-        self.N = torch.unique(self.edge_index.view(-1)).size(0)      # number of nodes
+        self.N = len(node_names_dict['input']) + len(node_names_dict['function']) + len(node_names_dict['output'])      # number of nodes
 
         self.register_buffer('function_edge_mask', torch.isin(edge_index[0], function_nodes)) # edges from a function node / e.g., not an input or output edge 
         self.register_buffer('input_edge_mask', self.input_node_mask[self.edge_index[0]].type(torch.float32))
 
         self.dropout = dropout
 
+        self.indices_params = get_conv_indices(edge_index, channels, function_nodes, fix_hidden_channels)
+
+        if subgraph_dict is not None: 
+            self.lin1_edge_mask_dict, self.lin2_edge_mask_dict, self.lin3_edge_mask_dict = get_edge_masks(subgraph_dict, 
+                                                                                            node_names_dict, 
+                                                                                            edge_index=self.edge_index, 
+                                                                                            two_layers=self.two_layer_conv, 
+                                                                                            indices_params=self.indices_params)
+
         _n = 1 if self.share_layers else self.layers
         self.ResBlocks = torch.nn.ModuleList([ResBlock(self.edge_index, channels, function_nodes, fix_hidden_channels, 
                                                        bias, nonlin, residual=residual, two_layers=two_layer_conv, 
-                                                       dropout=dropout, norm=norm, init=init, fix_inputs=fix_inputs) for i in range(_n)])
+                                                       dropout=dropout, norm=norm, init=init, fix_inputs=fix_inputs, 
+                                                       dropout_type=dropout_type, indices_params=self.indices_params) for i in range(_n)])
 
-    def forward(self, x, mask=None):
+    def get_batch_params(self, B, subgraph, device): 
+
+         # get edge masks
+        if subgraph is not None: 
+            if self.two_layer_conv: 
+                edge_mask_params = ([self.lin1_edge_mask_dict[v] for v in subgraph],
+                                    [self.lin2_edge_mask_dict[v] for v in subgraph],
+                                    [self.lin3_edge_mask_dict[v] for v in subgraph])
+            else: 
+                edge_mask_params = ([self.lin1_edge_mask_dict[v] for v in subgraph],
+                                    None,
+                                    [self.lin3_edge_mask_dict[v] for v in subgraph])
+        else: 
+            edge_mask_params=[None, None, None]
+
+
+
+        # precompute edge batching so it doesn't have to be done in every resblock 
+        batched_edge_indices1, edge_subset1 = batch_graphs(N=self.ResBlocks[0].lin1.N,
+                                                         M=self.ResBlocks[0].lin1.M, 
+                                                         edge_index = self.ResBlocks[0].lin1.indices, 
+                                                         B=B, 
+                                                         device=device, 
+                                                         edge_mask=edge_mask_params[0])
+        
+        if self.two_layer_conv: 
+            batched_edge_indices2, edge_subset2 = batch_graphs(N=self.ResBlocks[0].lin2.N,
+                                                            M=self.ResBlocks[0].lin2.M, 
+                                                            edge_index = self.ResBlocks[0].lin2.indices, 
+                                                            B=B, 
+                                                            device=device, 
+                                                            edge_mask=edge_mask_params[1])
+        else: 
+            batched_edge_indices2=edge_subset2=None
+        
+        batched_edge_indices3, edge_subset3 = batch_graphs(N=self.ResBlocks[0].lin3.N,
+                                                         M=self.ResBlocks[0].lin3.M, 
+                                                         edge_index = self.ResBlocks[0].lin3.indices, 
+                                                         B=B, 
+                                                         device=device, 
+                                                         edge_mask=edge_mask_params[2])
+        
+        return (batched_edge_indices1, batched_edge_indices2, batched_edge_indices3, edge_subset1, edge_subset2, edge_subset3)
+
+    def forward(self, x, mask=None, subgraph=None):
         '''
         Assumes x is the values of the "input" nodes ONLY
         ''' 
@@ -177,12 +270,14 @@ class GSNN(torch.nn.Module):
             for mod in modules: mod.set_mask(mask)
         if not self.residual: 
             for mod in modules: mod.set_x0(x0)
+
+        batch_params = self.get_batch_params(B, subgraph, x.device)
         
         if self.checkpoint and self.training: 
             x = Variable(x, requires_grad=True)
             x = checkpoint_sequential(functions=modules, segments=self.layers, input=x, use_reentrant=True)
         else:
-            for mod in modules: x = mod(x)
+            for mod in modules: x = mod(x, batch_params)
 
         if self.residual: x /= self.layers
 

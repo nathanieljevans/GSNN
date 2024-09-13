@@ -39,3 +39,4 @@ dependencies:
         - torch-sparse 
         - torch-scatter
         - torch-cluster
+        - pytest

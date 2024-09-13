@@ -31,9 +31,9 @@ $ conda activate gsnn
 
 ## Release of version 0.2 
 
-- Improved `SparseLinear` graph-batching to make it faster 
-- Implemented (optional) gradient checkpointing which markedly reduces memory requirements (~num_layers X memory reduction; ~40% increase runtime). 
-- Migrated the perturbation biology analysis code to auxillary repo; "gsnn-bio" 
+- Improved `SparseLinear` graph-batching (faster)
+- Implemented (optional) gradient checkpointing which markedly reduces memory requirements (as much as ~num_layers X memory reduction; ~40% increase runtime). 
+- Migrated the perturbation biology analysis code to auxillary repo; "gsnn-lib" 
 - added `\examples\` intended to help users understand the GSNN behavior and use-cases
 
 

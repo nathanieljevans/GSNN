@@ -39,6 +39,8 @@ class LincsDataset(Dataset):
         x_cell      = self.data.x_dict['cell_dict'][cell_iname]
         x           = x_drug + x_cell 
 
-        y         = torch.load(f'{self.root}/obs/{sig_id}.pt')
+        y           = torch.load(f'{self.root}/obs/{sig_id}.pt')
 
-        return x.to_dense().detach(), y.to_dense().detach(), sig_id
+        subgraph_var = 'DRUG__' + pert_id
+
+        return x.to_dense().detach(), y.to_dense().detach(), sig_id, subgraph_var
