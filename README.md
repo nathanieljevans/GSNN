@@ -35,5 +35,6 @@ $ conda activate gsnn
 - Implemented (optional) gradient checkpointing which markedly reduces memory requirements (as much as ~num_layers X memory reduction; ~40% increase runtime). 
 - Migrated the perturbation biology analysis code to auxillary repo; "gsnn-lib" 
 - added `\examples\` intended to help users understand the GSNN behavior and use-cases
+- added GSNN option for `batch` normalization 
 
 

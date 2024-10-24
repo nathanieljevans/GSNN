@@ -11,9 +11,8 @@ channels:
     - defaults 
 
 dependencies:
-    - python=3.12
+    - python=3.10
     - matplotlib
-    - pubchempy
     - pyg
     - pytorch
     - pytorch-cuda
@@ -22,20 +21,13 @@ dependencies:
     - h5py
     - scipy
     - tensorboard
-    - shapely
     - statsmodels
-    - rdkit
-    - shap
     - pip
-    - pyro
+    - pyro-ppl
     - pip:
         - tensorboardX
         - ipykernel
         - umap-learn
-        - biopython
-        - obonet
-        - omnipath 
-        - adjustText
         - torch-sparse 
         - torch-scatter
         - torch-cluster

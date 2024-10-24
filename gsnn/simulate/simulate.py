@@ -7,7 +7,7 @@ import networkx as nx
 
 from gsnn.simulate import utils
 
-def simulate(G, n_train, n_test, input_nodes, output_nodes, special_functions=None):
+def simulate(G, n_train, n_test, input_nodes, output_nodes, noise_scale=1, special_functions=None):
     """
     Simulates data using a Pyro Bayesian network based on a NetworkX directed graph.
     
@@ -27,7 +27,7 @@ def simulate(G, n_train, n_test, input_nodes, output_nodes, special_functions=No
     """
     
     # Convert the NetworkX graph into a Pyro model with special functions
-    pyro_model = utils.nx_to_pyro_model(G, input_nodes, output_nodes, special_functions)
+    pyro_model = utils.nx_to_pyro_model(G, input_nodes, output_nodes, special_functions, noise_scale=noise_scale)
     
     # Helper function to generate samples for a given number of instances
     def generate_samples(n_samples):

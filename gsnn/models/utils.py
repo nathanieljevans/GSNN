@@ -15,6 +15,54 @@ from sklearn.preprocessing import minmax_scale
 from scipy.stats import spearmanr
 
 
+
+def get_conv_indices(edge_index, channels, function_nodes, fix_hidden_channels): 
+    E = edge_index.size(1)  
+    w1_indices, node_hidden_channels = get_W1_indices(edge_index, channels, function_nodes, scale_by_degree=not fix_hidden_channels)
+    w2_indices = get_W2_indices(function_nodes, node_hidden_channels)
+    w3_indices = get_W3_indices(edge_index, function_nodes, node_hidden_channels)
+    w1_size = (E, np.sum(node_hidden_channels))
+    w2_size = (np.sum(node_hidden_channels), np.sum(node_hidden_channels))
+    w3_size = (np.sum(node_hidden_channels), E)
+
+    channel_groups = [] 
+    for node_id, c in enumerate(node_hidden_channels): 
+        for i in range(c): 
+            channel_groups.append(node_id)
+
+    return (w1_indices, w2_indices, w3_indices, w1_size, w2_size, w3_size, channel_groups)
+    
+def hetero2homo(edge_index_dict, node_names_dict): 
+
+    # convert edge_index_dict to edge_index (homogenous)
+    input_edge_index = edge_index_dict['input', 'to', 'function'].clone()
+    function_edge_index = edge_index_dict['function', 'to', 'function'].clone()
+    output_edge_index = edge_index_dict['function', 'to', 'output'].clone()
+
+    N_input = len(node_names_dict['input'])
+    N_function = len(node_names_dict['function'])
+    N_output = len(node_names_dict['output'])
+
+    # add offsets to treat as unique nodes 
+    input_edge_index[0, :] = input_edge_index[0,:] + N_function  # increment input nodes only 
+
+    output_edge_index[1, :] = output_edge_index[1, :] + N_function + N_input # increment output nodes only 
+
+    edge_index = torch.cat((function_edge_index, input_edge_index, output_edge_index), dim=1)
+    
+    input_node_mask = torch.zeros((N_input + N_function + N_output), dtype=torch.bool)
+    input_nodes = torch.arange(N_input) + N_function
+    input_node_mask[input_nodes] = True
+
+    output_node_mask = torch.zeros((N_input + N_function + N_output), dtype=torch.bool)
+    output_nodes = torch.arange(N_output) + N_function + N_input
+    output_node_mask[output_nodes] = True
+
+    num_nodes = N_input + N_function + N_output
+
+    return edge_index, input_node_mask, output_node_mask, num_nodes 
+
+
 def compute_sample_weights(sig_ids, max_prob_fold_diff=100):
     """
     Calculate the sample weights based on the joint frequency of cell lines and perturbation IDs.
@@ -94,7 +142,7 @@ def get_sigid_attrs(sig_ids):
     return cell_inames, pert_ids
 
 
-def _get_regressed_metrics(y, yhat, sig_ids, siginfo, ignore_errors=False): 
+def _get_regressed_metrics(y, yhat, sig_ids, siginfo, ignore_errors=True): 
     try: 
         r_cell = get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
     except: 
@@ -395,6 +443,7 @@ def node2edge(x, edge_index):
     src,dst = edge_index 
     return x[:, src] 
 
+
 def edge2node(x, edge_index, output_node_mask): 
     ''' 
     convert from edge indexed attributes `x` to node indexed attributes
@@ -406,7 +455,11 @@ def edge2node(x, edge_index, output_node_mask):
 
     B = x.size(0)
     out = torch.zeros(B, output_node_mask.size(0), dtype=torch.float32, device=x.device)
-    out[:, dst[output_edge_mask].view(-1)] = x[:, output_edge_mask].view(B, -1)
+
+    #out[:, dst[output_edge_mask].view(-1)] = x[:, output_edge_mask].view(B, -1)
+    idx = dst[output_edge_mask].view(-1).unsqueeze(0).expand(B, -1)
+    src = x[:, output_edge_mask].view(B, -1)
+    out = out.scatter_add(1, idx, src)
 
     return out
 
@@ -563,7 +616,7 @@ def corr_score(y, yhat, multioutput='uniform_weighted', method='pearson', eps=1e
     elif multioutput == 'uniform_median': 
         return np.nanmedian(corrs)
     elif multioutput == 'raw_values': 
-        return corrs
+        return np.array(corrs)
     else:
         raise ValueError('unrecognized multioutput value, expected one of "uniform_weighted", "raw_values"')
 

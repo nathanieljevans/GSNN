@@ -3,7 +3,7 @@ import pyro.distributions as dist
 import torch
 import networkx as nx
 
-def nx_to_pyro_model(G, input_nodes, output_nodes, special_functions=None):
+def nx_to_pyro_model(G, input_nodes, output_nodes, special_functions=None, noise_scale=1):
     """
     Converts a NetworkX directed graph into a Pyro Bayesian network model with Gaussian distributions
     and allows complex transformations (e.g., squaring inputs, logic gates) specified by the user.
@@ -51,7 +51,7 @@ def nx_to_pyro_model(G, input_nodes, output_nodes, special_functions=None):
                         raise ValueError(f"The special function for {node} returned a list instead of a scalar.")
                     
                     # Sample the node using a Gaussian distribution with the transformed value as the mean
-                    sampled_values[node] = pyro.sample(node, dist.Normal(transformed_value, 1))
+                    sampled_values[node] = pyro.sample(node, dist.Normal(transformed_value, noise_scale))
         
         # Collect the values for the output nodes
         output_values = {node: sampled_values[node] for node in output_nodes}

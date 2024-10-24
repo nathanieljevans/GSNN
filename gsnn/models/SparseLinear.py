@@ -23,7 +23,7 @@ class Conv(pyg.nn.MessagePassing):
         return edge_weight.view(-1, 1) * x_j.view(-1, 1)
 
 
-def batch_graphs(N, M, edge_index, B, device, edge_mask=None):
+def batch_graphs(N, M, edge_index, B, device):
     '''
     Create batched edge_index/edge_weight tensors for bipartite graphs.
 
@@ -41,20 +41,12 @@ def batch_graphs(N, M, edge_index, B, device, edge_mask=None):
     batched_edge_indices = edge_index.repeat(1, B).contiguous()
     batch_idx = torch.repeat_interleave(torch.arange(B, dtype=torch.long, device=device), E).contiguous()
 
-    if edge_mask is not None: 
-        ## this batching process takes much longer
-        edge_subset = torch.cat([mask + E*i for i,mask in enumerate(edge_mask)], dim=-1) # this takes most of the time
-        batched_edge_indices = batched_edge_indices[:, edge_subset]
-        batch_idx = batch_idx[edge_subset]
-    else: 
-        edge_subset=None
-
     src_incr = batch_idx*N
     dst_incr = batch_idx*M
     incr = torch.stack((src_incr, dst_incr), dim=0)
     batched_edge_indices += incr
 
-    return batched_edge_indices, edge_subset
+    return batched_edge_indices
 
 class SparseLinear(torch.nn.Module): 
     def __init__(self, indices, size, dtype=torch.float32, bias=True, init='kaiming'):
@@ -93,9 +85,11 @@ class SparseLinear(torch.nn.Module):
         else:
             raise ValueError('unrecognized weight initialization method, options: xavier, kaiming, lecun, normal')
         
+        self.init_var = std**2
+
         # scale normal distribution
         values = torch.randn(indices.size(1), dtype=dtype)
-        values *= std**2 # N(mean, variance)
+        values *= std # N(mean, std)
 
         self.values = torch.nn.Parameter(values) # torch optimizer require dense parameters 
         self.register_buffer('indices', indices.type(torch.long))
@@ -105,7 +99,7 @@ class SparseLinear(torch.nn.Module):
         self._B = 0 
         self._edge_index = None
 
-    def forward(self, x, batched_indices=None, edge_subset=None): 
+    def forward(self, x, batched_indices=None): 
         '''
         batch dimension is handled in `torch_geometric` fashion, e.g., concatenated batch graphs via incremented node idx 
 
@@ -119,13 +113,10 @@ class SparseLinear(torch.nn.Module):
         device = x.device
         B = x.size(0)
 
-        edge_weight = torch.cat([self.values for _ in range(B)], dim=0).contiguous()
+        edge_weight = self.values.expand(B, *self.values.shape).reshape(-1)
 
         if batched_indices is None: 
-            batched_indices, edge_subset = batch_graphs(N=self.N, M=self.M, edge_index=self.indices, B=B, device=device, edge_mask=edge_subset)
-
-        if edge_subset is not None: 
-            edge_weight = edge_weight[edge_subset]
+            batched_indices, = batch_graphs(N=self.N, M=self.M, edge_index=self.indices, B=B, device=device)
 
         if hasattr(self, 'bias'):
             bias_idx = torch.arange(self.M, device=device).repeat(B)

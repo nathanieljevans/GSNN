@@ -7,7 +7,7 @@ import torch_geometric as pyg
 
 class GroupLayerNorm(torch.nn.Module): 
 
-    def __init__(self, channel_groups, eps=1e-2, affine=True): 
+    def __init__(self, channel_groups, eps=1e-1, affine=True): 
         '''
 
         Args: 
