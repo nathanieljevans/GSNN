@@ -1,6 +1,6 @@
 import pytest
 import networkx as nx
-from gsnn.proc.subset import subset_graph
+from gsnn.proc.lincs.subset import subset_graph
 
 def create_test_graph1():
     """
