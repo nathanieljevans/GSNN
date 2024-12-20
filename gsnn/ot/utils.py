@@ -26,7 +26,6 @@ def eval(T, sampler, batch_size=64, partition='val', agg='mean', max_n=None):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     shd = SamplesLoss('sinkhorn', p=2, blur=0.05)
 
-    freeze_(T) 
     mmds_ = []
     shds_ = []
     wass_ = [] 
@@ -34,23 +33,29 @@ def eval(T, sampler, batch_size=64, partition='val', agg='mean', max_n=None):
     for i in range(len(sampler)): 
         print(f'[evaluating condition {i}/{len(sampler)}]', end='\r')
 
-        with torch.no_grad(): 
-            X,y, x_cell, x_drug, y0 = sampler.sample_(i, batch_size=max_n, partition=partition)
-            X = X.to(device); y=y.to(device); y0 = y0.to(device)
+        
+        X,y, x_cell, x_drug, y0 = sampler.sample_(i, batch_size=max_n, partition=partition, ret_all_y=False)
+        X = X.to(device); y=y.to(device); y0 = y0.to(device)
 
-            yhat = [] 
-            for idx in torch.split(torch.arange(X.shape[0]), batch_size): 
-                yhat.append( T(X[idx]) + y0[idx] )
-            yhat = torch.cat(yhat, dim=0)
+        yhat = [] 
+        for idx in torch.split(torch.arange(X.shape[0]), batch_size): 
+            if T.__class__.__name__ == 'Transporter':
+                # For ICNNs
+                yyhat = T(y0[idx], i) + y0[idx]
+            else:
+                with torch.no_grad(): yyhat = T(X[idx]) + y0[idx]
 
-            mu_delta_hat = yhat.mean(dim=0) - y0.mean(dim=0)
-            mu_delta = y.mean(dim=0) - y0.mean(dim=0)
+            yhat.append( yyhat )
+        yhat = torch.cat(yhat, dim=0)
 
-            mu_r2.append(r2_score(mu_delta.detach().cpu().numpy(), mu_delta_hat.detach().cpu().numpy()))
+        mu_delta_hat = yhat.mean(dim=0) - y0.mean(dim=0)
+        mu_delta = y.mean(dim=0) - y0.mean(dim=0)
 
-            mmds_.append(compute_scalar_mmd(y.detach().cpu().numpy(), yhat.detach().cpu().numpy()))
-            shds_.append(shd(yhat, y).item())
-            wass_.append(wasserstein_distance_nd(yhat.detach().cpu().numpy(), y.detach().cpu().numpy()))
+        mu_r2.append(r2_score(mu_delta.detach().cpu().numpy(), mu_delta_hat.detach().cpu().numpy()))
+
+        mmds_.append(compute_scalar_mmd(y.detach().cpu().numpy(), yhat.detach().cpu().numpy()))
+        shds_.append(shd(yhat, y).item())
+        wass_.append(wasserstein_distance_nd(yhat.detach().cpu().numpy(), y.detach().cpu().numpy()))
 
     if agg == 'mean':
         return np.mean(mmds_), np.mean(shds_), np.mean(wass_), np.mean(mu_r2)
@@ -102,15 +107,21 @@ def plot_transport_plan(sampler, T, F=None, conditions=None, dim_red='pca', max_
         cell_ = cond.cell_line 
         dose_ = cond.dose
 
-        with torch.no_grad():
-            X,y, x_cell, x_drug, y0 = sampler.sample_(idx=i, batch_size=max_n)
-            X = X.to(device); y=y.to(device); x_cell = x_cell.to(device); x_drug = x_drug.to(device); y0 = y0.to(device)
-            yf = torch.cat((x_cell, x_drug, y0), dim=-1)
+        X,y, x_cell, x_drug, y0 = sampler.sample_(idx=i, batch_size=max_n)
+        X = X.to(device); y=y.to(device); x_cell = x_cell.to(device); x_drug = x_drug.to(device); y0 = y0.to(device)
+        yf = torch.cat((x_cell, x_drug, y0), dim=-1)
 
-            delta = [] 
-            for idx in torch.split(torch.arange(X.shape[0]), 25): 
-                delta.append(T(X[idx].to(device)).detach().cpu())
-            delta = torch.cat(delta, dim=0)
+        delta = [] 
+        for idx in torch.split(torch.arange(X.shape[0]), 25): 
+
+            if T.__class__.__name__ == 'Transporter':
+                # For ICNNs
+                dd = T(y0[idx], i)
+            else:
+                with torch.no_grad(): dd = T(X[idx])
+                
+            delta.append(dd.detach().cpu())
+        delta = torch.cat(delta, dim=0)
 
         y0 = y0.detach().cpu().numpy()
         y = y.detach().cpu().numpy()

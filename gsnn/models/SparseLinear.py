@@ -81,7 +81,7 @@ class SparseLinear(torch.nn.Module):
         elif init == 'lecun': 
             std = (1/n_in)**(0.5)
         elif init == 'normal': 
-            std = torch.ones_like(values)
+            std = 1
         else:
             raise ValueError('unrecognized weight initialization method, options: xavier, kaiming, lecun, normal')
         
@@ -105,7 +105,7 @@ class SparseLinear(torch.nn.Module):
 
         Args: 
             x               input (B, N, 1)
-            edge_mask       boolean mask size (B, E); edges to include in the forward pass 
+            batched_indices 
         
         Returns:
           Tensor (B, M, 1)

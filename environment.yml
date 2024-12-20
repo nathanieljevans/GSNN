@@ -11,8 +11,9 @@ channels:
     - defaults 
 
 dependencies:
-    - python=3.10
+    - python
     - matplotlib
+    - numpy==1.26
     - pyg
     - pytorch
     - pytorch-cuda
@@ -32,3 +33,4 @@ dependencies:
         - torch-scatter
         - torch-cluster
         - pytest
+        - ax-platform

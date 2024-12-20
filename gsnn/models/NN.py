@@ -2,7 +2,8 @@ import torch
 
 class NN(torch.nn.Module): 
 
-    def __init__(self, in_channels, hidden_channels, out_channels, layers=2, dropout=0, nonlin=torch.nn.ELU, out=None, norm=torch.nn.BatchNorm1d): 
+    def __init__(self, in_channels, hidden_channels, out_channels, layers=2, dropout=0, 
+                        nonlin=torch.nn.ELU, out=None, norm=torch.nn.BatchNorm1d): 
         '''
         
         Args: 

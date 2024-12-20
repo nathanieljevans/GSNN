@@ -30,8 +30,8 @@ class SHD():
                             norm                            = 'layer',
                             checkpoint                      = args.checkpoint).to(self.device)
         elif args.T_arch == 'nn':
-            self.T = NN(in_channels          = data.node_names_dict['input'].shape[0],
-                        out_channels         = data.node_names_dict['output'].shape[0],
+            self.T = NN(in_channels          = len(data.node_names_dict['input']),
+                        out_channels         = len(data.node_names_dict['output']),
                         hidden_channels      = args.channels, 
                         layers               = args.layers,
                         dropout              = args.dropout,
