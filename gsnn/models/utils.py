@@ -384,27 +384,27 @@ def randomize(data):
     '''
     print('NOTE: RANDOMIZING EDGE INDEX')
     # permute edge index 
-    edge_index = copy.deepcopy(data.edge_index)
-    func_nodes  = (~(data.input_node_mask | data.output_node_mask)).nonzero(as_tuple=True)[0].detach().cpu().numpy()
+    edge_index_dict = copy.deepcopy(data.edge_index_dict)
+    N_funcs = len(data.node_names_dict['function'])
 
     # randomize the input edges (e.g., drug targets and omics)
-    src,dst = edge_index[:, data.input_edge_mask]
-    dst = torch.tensor(np.random.choice(func_nodes, size=(len(dst))), dtype=torch.long)
-    edge_index[:, data.input_edge_mask] = torch.stack((src, dst), dim=0)
+    # randomly select drug targets from all possible proteins 
+    src,dst = edge_index_dict['input', 'to', 'function']
+    dst = torch.tensor(np.random.choice(np.arange(N_funcs), size=(len(dst))), dtype=torch.long)
+    edge_index_dict['input', 'to', 'function'] = torch.stack((src, dst), dim=0)
 
     # randomize the function node connections
-    func_edge_mask = ~(data.input_edge_mask | data.output_edge_mask)
-    src,dst = edge_index[:, func_edge_mask]
-    src = torch.tensor(np.random.choice(func_nodes, size=(len(dst))), dtype=torch.long)
-    dst = torch.tensor(np.random.choice(func_nodes, size=(len(dst))), dtype=torch.long)
-    edge_index[:, func_edge_mask] = torch.stack((src, dst), dim=0)
+    src,dst = edge_index_dict['function', 'to', 'function']
+    src = torch.tensor(np.random.choice(np.arange(N_funcs), size=(len(dst))), dtype=torch.long)
+    dst = torch.tensor(np.random.choice(np.arange(N_funcs), size=(len(dst))), dtype=torch.long)
+    edge_index_dict['function', 'to', 'function'] = torch.stack((src, dst), dim=0)
 
     # randomize the output edge mask (e.g., endogenous feature connections)
-    src,dst = edge_index[:, data.output_edge_mask]
-    src = torch.tensor(np.random.choice(func_nodes, size=(len(dst))), dtype=torch.long)
-    edge_index[:, data.output_edge_mask] = torch.stack((src, dst), dim=0)
+    src,dst = edge_index_dict['function', 'to', 'output']
+    src = torch.tensor(np.random.choice(np.arange(N_funcs), size=(len(dst))), dtype=torch.long)
+    edge_index_dict['function', 'to', 'output'] = torch.stack((src, dst), dim=0)
 
-    return edge_index
+    return edge_index_dict
 
 
 
