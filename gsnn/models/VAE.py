@@ -11,13 +11,29 @@ from sklearn.metrics import average_precision_score, roc_auc_score, r2_score
 
 
 class VAE(nn.Module):
-    def __init__(self, input_dim, latent_dim=32, num_layers=2, hidden_channels=256, dropout=0.):
+    def __init__(self, input_dim, latent_dim=32, num_layers=2, hidden_channels=256, dropout=0., norm=torch.nn.BatchNorm1d):
         '''
         '''
         super().__init__()
         self.latent_dim      = latent_dim
-        self.encoder         = NN(in_channels=input_dim, hidden_channels=hidden_channels, out_channels=latent_dim*2, layers=num_layers, dropout=dropout, nonlin=torch.nn.ELU, out=None, norm=torch.nn.BatchNorm1d)
-        self.decoder         = NN(in_channels=latent_dim, hidden_channels=hidden_channels, out_channels=input_dim, layers=num_layers, dropout=dropout, nonlin=torch.nn.ELU, out=None, norm=torch.nn.BatchNorm1d)
+
+        self.encoder         = NN(in_channels=input_dim, 
+                                  hidden_channels=hidden_channels, 
+                                  out_channels=latent_dim*2, 
+                                  layers=num_layers, 
+                                  dropout=dropout, 
+                                  nonlin=torch.nn.Mish, 
+                                  out=None, 
+                                  norm=norm)
+        
+        self.decoder         = NN(in_channels=latent_dim, 
+                                  hidden_channels=hidden_channels, 
+                                  out_channels=input_dim, 
+                                  layers=num_layers, 
+                                  dropout=dropout, 
+                                  nonlin=torch.nn.Mish, 
+                                  out=None, 
+                                  norm=norm)
         
     def forward(self, x):
         
@@ -62,13 +78,20 @@ class VAE(nn.Module):
         patience = np.inf if patience == -1 else patience
         early_stopper = EarlyStopper(patience=patience)
 
+        best_state = None 
+        best_rec = np.inf
+
         for epoch in range(epochs): 
             self.train()
+
+            # 1 cycle beta anealing
+            #_beta = (torch.cos( torch.tensor(2*torch.pi*(epoch/epochs)-torch.pi) ) + 1)/2* beta 
+            _beta = beta
 
             for idx in torch.randperm(x_train.size(0)).split(batch_size):
 
                 optim.zero_grad()
-                loss, bce, kl = self.get_loss(x_train[idx].to(device), beta=beta)
+                loss, mse, kl = self.get_loss(x_train[idx].to(device), beta=_beta)
                 loss.backward()
                 optim.step()
 
@@ -76,15 +99,21 @@ class VAE(nn.Module):
                 recs = [] 
                 kls = []
                 for idx in torch.randperm(x_test.size(0)).split(batch_size):
-                    loss, rec, kl = self.get_loss(x_test[idx].to(device), beta=beta)
+                    loss, rec, kl = self.get_loss(x_test[idx].to(device), beta=_beta)
                     recs.append(rec.item())
                     kls.append(kl.item())
                 recs = np.mean(recs)
                 kls = np.mean(kls)
-                if early_stopper.early_stop(loss): break 
 
+                if rec < best_rec:
+                    best_rec = rec
+                    best_state = self.state_dict()
 
-            if verbose: print(f'Epoch {epoch}--> test mse: {recs:.4f}, test kl: {kls:.4f}', end='\r')
+                if early_stopper.early_stop(rec): break 
+
+            if verbose: print(f'Epoch {epoch}--> test mse: {recs:.4f}, test kl: {kls:.4f}, beta: {_beta:.4f}', end='\r')
+
+        self.load_state_dict(best_state)
 
         if verbose: 
             print() 
@@ -95,14 +124,16 @@ class VAE(nn.Module):
                 with torch.no_grad(): xhat = self.decode(self.encode(x_test[idx].to(device)))
                 xhats.append(xhat)
             xhats = torch.cat(xhats, dim=0)
-            r2 = r2_score(x_test.cpu().numpy(), xhats.detach().cpu().numpy())
+            r2 = r2_score(x_test.cpu().numpy(), xhats.detach().cpu().numpy(), multioutput='variance_weighted')
             print('VAE test R^2:', r2)
             print()
 
     def encode(self, x): 
         self.eval()
-        return self.encoder(x)[:, :self.latent_dim]
+        with torch.no_grad(): 
+            return self.encoder(x)[:, :self.latent_dim]
     
     def decode(self, z): 
         self.eval()
-        return self.decoder(z)
+        with torch.no_grad(): 
+            return self.decoder(z)

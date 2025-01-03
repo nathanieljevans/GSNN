@@ -214,6 +214,12 @@ def get_optim(optim):
 
     if optim == 'adam': 
         return torch.optim.Adam 
+    elif optim == 'adan': 
+        try: 
+            from adan import Adan
+        except: 
+            raise ImportError('adan not installed. Please install adan (see: https://github.com/sail-sg/Adan)')
+        return Adan
     elif optim == 'sgd': 
         return torch.optim.SGD 
     elif optim == 'rmsprop': 
