@@ -7,6 +7,7 @@ import numpy as np
 from gsnn.models.SparseLinear import SparseLinear
 from gsnn.models.GroupLayerNorm import GroupLayerNorm
 from gsnn.models.SoftmaxGroupNorm import SoftmaxGroupNorm
+from gsnn.models.GroupBatchNorm import GroupBatchNorm
 import warnings 
 
 
@@ -56,9 +57,6 @@ def hetero2homo(edge_index_dict, node_names_dict):
     num_nodes = N_input + N_function + N_output
 
     return edge_index, input_node_mask, output_node_mask, num_nodes 
-
-
-
 
 
 def get_Win_indices(edge_index, channels, function_nodes): 
@@ -283,7 +281,7 @@ class ResBlock(torch.nn.Module):
             nonlin (callable): The nonlinear activation function class (e.g., torch.nn.ELU).
             indices_params (tuple): Indexing parameters for constructing sparse linear layers.
             dropout (float, optional): Dropout probability. Default is 0.
-            norm (str, optional): Normalization type ('layer', 'batch', 'softmax', or 'none'). Default is 'layer'.
+            norm (str, optional): Normalization type ('layer', 'batch', 'softmax', 'groupbatch', 'edgebatch' or 'none'). Default is 'layer'.
             init (str, optional): Initialization strategy for weights ('xavier', 'kaiming', ???). Default is 'xavier'.
 
         Notes:
@@ -303,6 +301,13 @@ class ResBlock(torch.nn.Module):
             self.norm_first = True 
         elif norm == 'batch': 
             _norm = lambda: torch.nn.BatchNorm1d(len(channel_groups), eps=1e-2)
+            self.norm_first = True
+        elif norm == 'groupbatch': 
+            _norm = lambda: GroupBatchNorm(channel_groups)
+            self.norm_first = True
+        elif norm == 'edgebatch':
+            _norm = lambda: torch.nn.Identity()
+            self._edge_norm = torch.nn.BatchNorm1d(w_in_size[0], eps=1e-2)
             self.norm_first = True
         elif norm == 'softmax': 
             _norm = lambda: SoftmaxGroupNorm(channel_groups)
@@ -333,7 +338,7 @@ class ResBlock(torch.nn.Module):
 
         self.node_mask = mask
 
-    def forward(self, x, batch_params): 
+    def forward(self, x, batch_params, node_err=None): 
         """
         Forward pass of the ResBlock.
 
@@ -348,11 +353,22 @@ class ResBlock(torch.nn.Module):
             ??? Confirm that input x matches the indexing defined in indices_params.
         """
 
-        out = self.lin_in(x, batched_indices=batch_params[0])      
+        if hasattr(self, '_edge_norm'): 
+            out = self._edge_norm(x)
+        else: 
+            out = x
+
+        out = self.lin_in(out, batched_indices=batch_params[0])    
+
+        ###### in development ######
+        if node_err is not None:
+            out = out + node_err.unsqueeze(-1)  
+        ############################
         
         out = apply_norm_and_nonlin(self.norm, self.nonlin, out, self.norm_first)
 
-        if self.node_mask is not None: out = out.squeeze(-1) * self.node_mask.squeeze(-1)
+        if self.node_mask is not None: 
+            out = out.squeeze(-1) * self.node_mask.squeeze(-1)
 
         out = self.lin_out(out, batched_indices=batch_params[1]) 
 
@@ -419,6 +435,12 @@ class GSNN(torch.nn.Module):
         self.checkpoint                 = checkpoint
         self.norm                       = norm
         self.dropout                    = dropout
+
+        if self.checkpoint: 
+            # BUG:  checkpoint.py:1399: FutureWarning: `torch.cpu.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cpu', args...)` instead.
+            #       with device_autocast_ctx, torch.cpu.amp.autocast(**cpu_autocast_kwargs), recompute_context:  # type: ignore[attr-defined]
+            #       /home/teddy/miniconda3/envs/gsnn-lib/lib/python3.12/site-packages/torch/utils/checkpoint.py:1399: FutureWarning: `torch.cpu.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cpu', args...)` instead.
+            warnings.filterwarnings("ignore", category=FutureWarning)
 
         self.register_buffer('output_node_mask', output_node_mask)
         self.register_buffer('input_node_mask', input_node_mask)
@@ -524,8 +546,46 @@ class GSNN(torch.nn.Module):
         batch_params = self.get_batch_params(B, x.device)
 
         return x, batch_params, modules
+    
+    def prune(self, threshold=1e-2, verbose=False): 
+        """
+        Prune the model by removing channels with small weights. Remember to reinitialize the optimizer if using during training. 
 
-    def forward(self, x, node_mask=None, edge_mask=None, ret_edge_out=False):
+        Args:
+            threshold (float, optional): The threshold below which weights are considered insignificant. Default is 1e-2.
+
+        Notes:
+            ??? Confirm the exact pruning strategy and how it interacts with the model.
+        """
+
+        w1 = [] ; w2 = []
+        for mod in self.ResBlocks: 
+            w1.append(mod.lin_in.values)
+            w2.append(mod.lin_out.values)
+        w1 = torch.stack(w1, dim=0)
+        w2 = torch.stack(w2, dim=0)
+
+        w1_abs_max = torch.max(torch.abs(w1), dim=0).values
+        w2_abs_max = torch.max(torch.abs(w2), dim=0).values
+
+        keep_idxs1 = (w1_abs_max >= threshold).nonzero(as_tuple=True)[0]
+        keep_idxs2 = (w2_abs_max >= threshold).nonzero(as_tuple=True)[0]
+
+        for mod in self.ResBlocks:
+            mod.lin_in.prune(keep_idxs1)
+            mod.lin_out.prune(keep_idxs2)
+
+            # reset cached batch params 
+            self._B = None; self._batch_params = None
+
+        if verbose: 
+            print(f'Pruned in/out: {w1.size(1) - len(keep_idxs1)}, {w2.size(1) - len(keep_idxs2)} -> remaining in/out: {len(keep_idxs1)}, {len(keep_idxs2)}')
+
+        # return the number of parameters removed 
+        return w1.size(1) - len(keep_idxs1) + w2.size(1) - len(keep_idxs2)
+        
+
+    def forward(self, x, node_mask=None, edge_mask=None, ret_edge_out=False, e0=None, node_errs=None):
         """
         Forward pass of the GSNN model.
 
@@ -534,6 +594,7 @@ class GSNN(torch.nn.Module):
             node_mask (torch.Tensor, optional): A boolean mask for nodes, shape (B, N). Default is None.
             edge_mask (torch.Tensor, optional): A mask applied to edge features, shape (B, E). Default is None.
             ret_edge_out (bool, optional): If True, return edge-level outputs instead of node-level. Default is False.
+            e0 (torch.Tensor, optional): Initial edge-level features. Default is None. Used for inferring input errors. 
 
         Returns:
             (torch.Tensor): If ret_edge_out is False, node-level output features (B, number_of_output_nodes).
@@ -543,15 +604,27 @@ class GSNN(torch.nn.Module):
             ??? Confirm what happens if node_mask or edge_mask are partially active or mismatched in shape.
         """
 
+        ############ in dev ################
+        if node_errs is None:
+            node_errs = [None]*self.layers
+        else: 
+            if len(node_errs) != self.layers: 
+                raise ValueError('node_errs must be the same length as the number of layers')
+        ###################################
+
         x, batch_params, modules = self._preprocess(x, node_mask)
 
+        if e0 is not None:
+            x = x + e0
+
         if self.checkpoint and self.training: x.requires_grad_(True)
-        for i,mod in enumerate(modules): 
+        for i, (mod,nerr) in enumerate(zip(modules, node_errs)): 
 
             if self.checkpoint and self.training: 
-                x = checkpoint(mod, x, batch_params, use_reentrant=False)
+                #x = checkpoint(mod, x, batch_params, use_reentrant=False)
+                x = checkpoint(mod, x, batch_params, node_err=nerr, use_reentrant=False)
             else: 
-                x = mod(x, batch_params)
+                x = mod(x, batch_params, node_err=nerr)
 
             if edge_mask is not None: x = x*edge_mask
 
@@ -565,3 +638,4 @@ class GSNN(torch.nn.Module):
         else: 
             out = edge2node(x, self.edge_index, self.output_node_mask)[:, self.output_node_mask]
             return out
+        

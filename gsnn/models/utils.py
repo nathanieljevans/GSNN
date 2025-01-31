@@ -195,6 +195,10 @@ def get_activation(act):
 
     if act == 'relu': 
         return torch.nn.ReLU 
+    elif act == 'leakyrelu':
+        return torch.nn.LeakyReLU
+    elif act == 'prelu': 
+        return torch.nn.PReLU
     elif act == 'elu': 
         return torch.nn.ELU 
     elif act == 'gelu': 
@@ -207,6 +211,8 @@ def get_activation(act):
         return torch.nn.SELU  
     elif act == 'softplus': 
         return torch.nn.Softplus  
+    elif act == 'linear': 
+        return torch.nn.Identity
     else:
         raise ValueError(f'unrecognized activation function: {act}')
 

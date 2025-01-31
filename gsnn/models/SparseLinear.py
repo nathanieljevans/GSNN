@@ -93,6 +93,7 @@ class SparseLinear(torch.nn.Module):
 
         self.values = torch.nn.Parameter(values) # torch optimizer require dense parameters 
         self.register_buffer('indices', indices.type(torch.long))
+        
         if bias: self.bias = torch.nn.Parameter(torch.zeros((self.M, 1), dtype=dtype))
 
         # caching 
@@ -131,3 +132,12 @@ class SparseLinear(torch.nn.Module):
         x = x.view(B, -1, 1)
 
         return x
+
+    def prune(self, idxs):
+        """
+        """
+        self.values = torch.nn.Parameter(self.values[idxs])
+        self.register_buffer('indices', self.indices[:, idxs])
+
+        
+            
