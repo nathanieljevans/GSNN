@@ -1,5 +1,5 @@
 pyg_sphinx_theme @ git+https://github.com/pyg-team/pyg_sphinx_theme.git
 docutils==0.19
-myst-parser==4.0.1
+myst-parser==0.19.2
 nbsphinx
 sphinx-autodoc-typehints
