@@ -1,5 +1,4 @@
-sphinx>=6.0
 pyg_sphinx_theme @ git+https://github.com/pyg-team/pyg_sphinx_theme.git
 myst-parser>=2.0
 nbsphinx
-sphinx-autodoc-typehints 
+sphinx-autodoc-typehints
