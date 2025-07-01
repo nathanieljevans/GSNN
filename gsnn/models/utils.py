@@ -179,9 +179,12 @@ class TBLogger:
     def log(self, epoch, train_metrics, val_metrics):
         # Expecting train_metrics and val_metrics to be dictionaries,
         # something like: {'loss': ..., 'r2': ..., 'r_flat': ...}
+
+        '''
         train_loss = train_metrics.get('loss', None)
         val_r2 = val_metrics.get('r2', None)
         val_r_flat = val_metrics.get('r_flat', None)
+        val_mse = val_metrics.get('mse', None)
 
         if train_loss is not None:
             self.writer.add_scalar('train-loss', train_loss, epoch)
@@ -189,6 +192,14 @@ class TBLogger:
             self.writer.add_scalar('val-r2', val_r2, epoch)
         if val_r_flat is not None:
             self.writer.add_scalar('val-corr-flat', val_r_flat, epoch)
+        if val_mse is not None:
+            self.writer.add_scalar('val-mse', val_mse, epoch)
+        '''
+        for k,v in train_metrics.items(): 
+            self.writer.add_scalar(f'train-{k}', v, epoch)
+
+        for k,v in val_metrics.items():
+            self.writer.add_scalar(f'val-{k}', v, epoch)
 
 
 def get_activation(act): 

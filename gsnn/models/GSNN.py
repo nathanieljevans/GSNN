@@ -56,7 +56,9 @@ def hetero2homo(edge_index_dict, node_names_dict):
 
     num_nodes = N_input + N_function + N_output
 
-    return edge_index, input_node_mask, output_node_mask, num_nodes 
+    homo_names = node_names_dict['function'] + node_names_dict['input'] + node_names_dict['output']
+
+    return edge_index, input_node_mask, output_node_mask, num_nodes, homo_names
 
 
 def get_Win_indices(edge_index, channels, function_nodes): 
@@ -158,12 +160,6 @@ def node2edge(x, edge_index):
     src,dst = edge_index 
     return x[:, src] 
 
-
-
-
-
-
-
 def edge2node(x, edge_index, output_node_mask): 
     """
     Convert edge-level features back to node-level features, focusing on output nodes.
@@ -179,15 +175,16 @@ def edge2node(x, edge_index, output_node_mask):
     Notes:
         Only output nodes are nonzero to avoid potential collisions if in-degree > 1
     """
-    output_nodes = output_node_mask.nonzero(as_tuple=True)[0]
+
+    output_node_ixs = output_node_mask.nonzero(as_tuple=True)[0]
     src, dst = edge_index 
-    output_edge_mask = torch.isin(dst, output_nodes)
+    output_edge_mask = torch.isin(dst, output_node_ixs)
 
     B = x.size(0)
     out = torch.zeros(B, output_node_mask.size(0), dtype=torch.float32, device=x.device)
 
     #out[:, dst[output_edge_mask].view(-1)] = x[:, output_edge_mask].view(B, -1)
-    idx = dst[output_edge_mask].view(-1).unsqueeze(0).expand(B, -1)
+    idx = dst[output_edge_mask].view(1, -1).expand(B, -1)
     src = x[:, output_edge_mask].view(B, -1)
     out = out.scatter_add(1, idx, src)
 
@@ -272,7 +269,7 @@ def apply_norm_and_nonlin(norm, nonlin, out, norm_first):
 
 class ResBlock(torch.nn.Module): 
 
-    def __init__(self, bias, nonlin, indices_params, dropout=0., norm='layer', init='xavier'): 
+    def __init__(self, bias, nonlin, indices_params, dropout=0., norm='layer', init='xavier', lin_in=None, lin_out=None, residual=True): 
         """
         A residual block that applies sparse linear transformations, normalization, and nonlinearities.
 
@@ -283,6 +280,9 @@ class ResBlock(torch.nn.Module):
             dropout (float, optional): Dropout probability. Default is 0.
             norm (str, optional): Normalization type ('layer', 'batch', 'softmax', 'groupbatch', 'edgebatch' or 'none'). Default is 'layer'.
             init (str, optional): Initialization strategy for weights ('xavier', 'kaiming', ???). Default is 'xavier'.
+            lin_in (SparseLinear, optional): Predefined input linear layer. If None, constructed from indices_params.
+            lin_out (SparseLinear, optional): Predefined output linear layer. If None, constructed from indices_params.
+            residual (bool, optional): If True, adds the input to the output (residual connection). Default is True. 
 
         Notes:
             ??? Clarify expected input shapes for forward method and how node_mask interacts.
@@ -291,6 +291,7 @@ class ResBlock(torch.nn.Module):
         super().__init__()
         
         w_in_indices, w_out_indices, w_in_size, w_out_size, channel_groups = indices_params
+        self.residual = residual
         
         self.norm = norm
         self.dropout = dropout
@@ -300,7 +301,7 @@ class ResBlock(torch.nn.Module):
             _norm = lambda: GroupLayerNorm(channel_groups)
             self.norm_first = True 
         elif norm == 'batch': 
-            _norm = lambda: torch.nn.BatchNorm1d(len(channel_groups), eps=1e-2)
+            _norm = lambda: torch.nn.BatchNorm1d(len(channel_groups), eps=1e-3, affine=False)
             self.norm_first = True
         elif norm == 'groupbatch': 
             _norm = lambda: GroupBatchNorm(channel_groups)
@@ -318,10 +319,17 @@ class ResBlock(torch.nn.Module):
         else:
             raise ValueError('unrecognized norm type')
 
-        self.lin_in = SparseLinear(indices=w_in_indices, size=w_in_size, bias=bias, init=init)
-        self.norm = _norm()
-        self.lin_out = SparseLinear(indices=w_out_indices, size=w_out_size, bias=bias, init=init)
+        if lin_in is not None:
+            self.lin_in = lin_in 
+        else:
+            self.lin_in = SparseLinear(indices=w_in_indices, size=w_in_size, bias=bias, init=init)
+        
+        if lin_out is not None:
+            self.lin_out = lin_out
+        else:
+            self.lin_out = SparseLinear(indices=w_out_indices, size=w_out_size, bias=bias, init=init)
 
+        self.norm = _norm()
         self.nonlin = nonlin()
         self.mask = None 
 
@@ -375,7 +383,8 @@ class ResBlock(torch.nn.Module):
         # drops out edge features, not node hidden channels 
         out = torch.nn.functional.dropout(out, p=self.dropout, training=self.training)
 
-        out = out.squeeze(-1) + x 
+        if self.residual: 
+            out = out.squeeze(-1) + x 
         
         return out
     
@@ -385,13 +394,11 @@ class ResBlock(torch.nn.Module):
 #########################################################################################################################
 #########################################################################################################################
 
-
-
 class GSNN(torch.nn.Module): 
 
     def __init__(self, edge_index_dict, node_names_dict, channels, layers, dropout=0., nonlin=torch.nn.ELU, bias=True, 
                  share_layers=True, add_function_self_edges=True, norm='layer', init='xavier', verbose=False, 
-                 edge_channels=1, checkpoint=False):
+                 edge_channels=1, checkpoint=False, residual=True):
         """
         A Graph-based neural network model that operates on heterogeneous inputs converted to a homogeneous format.
         It uses residual blocks to process node-to-edge converted features and return outputs on specified nodes.
@@ -422,7 +429,7 @@ class GSNN(torch.nn.Module):
         if edge_channels > 1:
             edge_index_dict['function', 'to', 'function'] = edge_index_dict['function', 'to', 'function'].repeat(1, edge_channels)
 
-        edge_index, input_node_mask, output_node_mask, self.num_nodes = hetero2homo(edge_index_dict, node_names_dict)
+        edge_index, input_node_mask, output_node_mask, self.num_nodes, self.homo_names = hetero2homo(edge_index_dict, node_names_dict)
 
         self.nonlin                     = nonlin
         self.bias                       = bias
@@ -435,6 +442,7 @@ class GSNN(torch.nn.Module):
         self.checkpoint                 = checkpoint
         self.norm                       = norm
         self.dropout                    = dropout
+        self.residual                   = residual
 
         if self.checkpoint: 
             # BUG:  checkpoint.py:1399: FutureWarning: `torch.cpu.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cpu', args...)` instead.
@@ -455,23 +463,36 @@ class GSNN(torch.nn.Module):
 
         func_edge_mask = torch.isin(edge_index[0], function_nodes) & torch.isin(edge_index[1], function_nodes) # edges from function -> function / e.g., not an input or output edge 
         inp_edge_mask = torch.isin(edge_index[0], input_node_mask.nonzero(as_tuple=True)[0]) & torch.isin(edge_index[1], function_nodes) # edges from input -> function
+        output_edge_mask = ~(func_edge_mask | inp_edge_mask)
         self.register_buffer('function_edge_mask', func_edge_mask) 
         self.register_buffer('input_edge_mask', inp_edge_mask)
+        self.register_buffer('output_edge_mask', output_edge_mask)
 
         self.indices_params = get_conv_indices(edge_index, channels, function_nodes)
 
-        _n = 1 if self.share_layers else self.layers
+        if self.share_layers: 
+            w_in_indices, w_out_indices, w_in_size, w_out_size, channel_groups = self.indices_params
+            lin_in = SparseLinear(indices=w_in_indices, size=w_in_size, bias=bias, init=init)
+            lin_out = SparseLinear(indices=w_out_indices, size=w_out_size, bias=bias, init=init)
+        else: 
+            lin_in = None
+            lin_out = None
+
         self.ResBlocks = torch.nn.ModuleList([ResBlock(bias             = self.bias,    
                                                        nonlin           = self.nonlin, 
                                                        dropout          = dropout, 
                                                        norm             = norm, 
                                                        init             = init, 
-                                                       indices_params   = self.indices_params) for i in range(_n)])
+                                                       indices_params   = self.indices_params,
+                                                       lin_in           = lin_in,
+                                                       lin_out          = lin_out,
+                                                       residual         = self.residual) for i in range(self.layers)])
         
         self._B             = None
         self._batch_params  = None
 
-        self.scale = torch.nn.Parameter(torch.tensor(self.layers**(0.5), dtype=torch.float32))
+        self.scale = torch.tensor(self.layers**(0.5), dtype=torch.float32)
+
 
     def get_batch_params(self, B, device): 
         """
@@ -534,10 +555,7 @@ class GSNN(torch.nn.Module):
 
         x = node2edge(x_node, self.edge_index)  # convert x to edge-indexed
         
-        if self.share_layers: 
-            modules = [self.ResBlocks[0] for i in range(self.layers)]
-        else: 
-            modules = [blk for blk in self.ResBlocks]
+        modules = [blk for blk in self.ResBlocks]
 
         # faster if we do this up front 
         if node_mask is not None: node_mask = torch.stack([torch.isin(modules[0].channel_groups, node_mask[i].nonzero(as_tuple=True)[0]) for i in range(node_mask.size(0))], dim=0)
@@ -621,7 +639,6 @@ class GSNN(torch.nn.Module):
         for i, (mod,nerr) in enumerate(zip(modules, node_errs)): 
 
             if self.checkpoint and self.training: 
-                #x = checkpoint(mod, x, batch_params, use_reentrant=False)
                 x = checkpoint(mod, x, batch_params, node_err=nerr, use_reentrant=False)
             else: 
                 x = mod(x, batch_params, node_err=nerr)
@@ -630,12 +647,10 @@ class GSNN(torch.nn.Module):
 
         # under assumption that each layer output is iid unit normal (weak assumption since layer outputs will be correlated)
         # then x = N(0,1) + N(0,1) + ... + N(0,1) = N(0, sqrt(layers))
-        # add a check to take the max of scale or 1 
-        x = x / torch.max(self.scale, torch.tensor(1., device=x.device))
+        if not self.residual: x = x / self.scale
 
         if ret_edge_out: 
             return x
         else: 
             out = edge2node(x, self.edge_index, self.output_node_mask)[:, self.output_node_mask]
             return out
-        

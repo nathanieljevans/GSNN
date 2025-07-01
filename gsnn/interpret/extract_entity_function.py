@@ -3,29 +3,24 @@ import numpy as np
 import torch_geometric as pyg 
 import scipy 
 import gsnn.models.utils as utils
-from gsnn.models.utils import get_conv_indices
+from gsnn.models.GSNN import get_conv_indices
 
 class dense_func_node(torch.nn.Module): 
-    def __init__(self, lin1, lin3, nonlin, norm, lin2=None): 
+    def __init__(self, lin_in, lin_out, nonlin, norm): 
         super().__init__()
-        self.lin1 = lin1 
-        self.lin2 = lin2 
-        self.lin3 = lin3 
+        self.lin_in = lin_in
+        self.lin_out = lin_out
         self.nonlin = nonlin 
         
         if norm == 'layer': 
-            channels = lin1.size(1)
+            channels = lin_in.weight.data.size(1)
             self.norm = torch.nn.LayerNorm(channels, elementwise_affine=False)
 
     def forward(self, x):
-        x = self.lin1(x)
+        x = self.lin_in(x)
         if hasattr(self, 'norm'): x = self.norm(x)
         x = self.nonlin(x)
-        if self.lin2 is not None: 
-            x = self.lin2(x)
-            if hasattr(self, 'norm'): x = self.norm(x)
-            x = self.nonlin(x)
-        x = self.lin3(x) 
+        x = self.lin_out(x) 
 
         return x
 
@@ -45,8 +40,6 @@ def extract_entity_function(node, model, data, layer=0):
         func        (torch.nn.Module)       extracted entity function 
         meta        (dict)                  input edge names, output edge names 
     '''
-    assert model.fix_hidden_channels == True, 'degree scaled function nodes are not supported for entity extraction'
-    assert model.two_layer_conv == False, 'two layer function nodes are not supported for entity extraction'
 
     model = model.cpu()
 
@@ -72,9 +65,9 @@ def extract_entity_function(node, model, data, layer=0):
     # the hidden channel indices relevant to `node`
     function_nodes = torch.arange(len(data.node_names_dict['function']))
     
-    w1_indices, w2_indices, w3_indices, w1_size, w2_size, w3_size, channel_groups = get_conv_indices(model.edge_index, model.channels, function_nodes, fix_hidden_channels=True)
+    w1_indices, w_out_indices, w_in_size, w_out_size, channel_groups = get_conv_indices(model.edge_index, model.channels, function_nodes)
     
-    assert (w1_indices == model.ResBlocks[layer].lin1.indices).all(), 'W1 indices do not match model W1 indices'
+    assert (w1_indices == model.ResBlocks[layer].lin_in.indices).all(), 'W1 indices do not match model W1 indices'
 
     channel_groups = np.array(channel_groups)
     hidden_idxs = torch.tensor((channel_groups == node_idx).nonzero()[0], dtype=torch.long)
@@ -82,16 +75,16 @@ def extract_entity_function(node, model, data, layer=0):
 
     # we have a bipartite network from edge_idx -> function node hidden layers
     indices, values = pyg.utils.bipartite_subgraph(subset           = (input_edges, hidden_idxs), 
-                                                   edge_index       = model.ResBlocks[layer].lin1.indices, 
-                                                   edge_attr        = model.ResBlocks[layer].lin1.values.data, 
+                                                   edge_index       = model.ResBlocks[layer].lin_in.indices, 
+                                                   edge_attr        = model.ResBlocks[layer].lin_in.values.data, 
                                                    relabel_nodes    = True, 
                                                    return_edge_mask = False,
                                                    size             = (model.edge_index.size(1), len(channel_groups)))
     
     w1_smol = scipy.sparse.coo_array((values.detach(), (indices[0,:].detach(), indices[1,:].detach())), shape=(len(input_edges), N_channels)).todense()
     
-    if hasattr(model.ResBlocks[layer].lin1, 'bias'): 
-        w1_bias = model.ResBlocks[layer].lin1.bias[output_edges].detach().numpy()
+    if hasattr(model.ResBlocks[layer].lin_in, 'bias'): 
+        w1_bias = model.ResBlocks[layer].lin_in.bias[output_edges].detach().numpy()
     else: 
         w1_bias = None
 
@@ -100,15 +93,15 @@ def extract_entity_function(node, model, data, layer=0):
     if w1_bias is not None: lin1_smol.bias = torch.nn.Parameter(torch.tensor(w1_bias.squeeze(), dtype=torch.float32))
 
     indices, values = pyg.utils.bipartite_subgraph(subset=(hidden_idxs, output_edges), 
-                                                   edge_index=model.ResBlocks[layer].lin3.indices, 
-                                                   edge_attr=model.ResBlocks[layer].lin3.values, 
+                                                   edge_index=model.ResBlocks[layer].lin_out.indices, 
+                                                   edge_attr=model.ResBlocks[layer].lin_out.values, 
                                                    relabel_nodes=True, 
                                                    return_edge_mask=False)
 
     w3_smol = scipy.sparse.coo_array((values.detach(), (indices[0,:].detach(), indices[1,:].detach())), shape=(N_channels, len(output_edges.view(-1)))).todense()
     
-    if hasattr(model.ResBlocks[layer].lin3, 'bias'): 
-        w3_bias = model.ResBlocks[layer].lin3.bias[output_edges].detach().numpy()
+    if hasattr(model.ResBlocks[layer].lin_out, 'bias'): 
+        w3_bias = model.ResBlocks[layer].lin_out.bias[output_edges].detach().numpy()
     else: 
         w3_bias = None
 
@@ -117,7 +110,7 @@ def extract_entity_function(node, model, data, layer=0):
     if w3_bias is not None: lin3_smol.bias = torch.nn.Parameter(torch.tensor(w3_bias.squeeze(), dtype=torch.float32))
 
     norm = 'layer' if hasattr(model, 'norm') else 'none'
-    func = dense_func_node(lin1=lin1_smol, lin2=None, lin3=lin3_smol, nonlin=model.ResBlocks[0].nonlin, norm=norm)
+    func = dense_func_node(lin_in=lin1_smol, lin_out=lin3_smol, nonlin=model.ResBlocks[0].nonlin, norm=norm)
 
     meta = {'input_edge_names':inp_edge_names, 'output_edge_names':out_edge_names}
 

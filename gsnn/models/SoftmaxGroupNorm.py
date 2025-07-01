@@ -7,14 +7,13 @@ class SoftmaxGroupNorm(torch.nn.Module):
         Args:
             channel_groups (tensor): Specifies which group each channel belongs to.
             eps (float): A small value to avoid division by zero.
-            affine (bool): If True, includes learnable gamma and beta parameters per group.
         """
         super().__init__()
         
         self.register_buffer('channel_groups', torch.tensor(channel_groups, dtype=torch.long))
         unique_groups, counts = torch.unique(self.channel_groups, return_counts=True)
         self.register_buffer('n_channels', counts)
-        
+
         self.eps = eps
         
     def forward(self, x):

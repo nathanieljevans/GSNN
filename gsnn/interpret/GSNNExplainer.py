@@ -89,7 +89,8 @@ class GSNNExplainer:
 
     def explain(self, x, baseline=None, return_predictions=False): 
         '''
-        initializes and runs gradient descent to select a minimal subset of edges that produce comparable predictions to the full graph. 
+        initializes and runs gradient descent to select a minimal subset of edges that produce comparable predictions 
+        to the full graph. 
         
         Args: 
             x               torch.tensor            inputs to explain; in shape (B, I, 1)

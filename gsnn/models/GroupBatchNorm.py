@@ -13,7 +13,7 @@ class GroupBatchNorm(nn.Module):
                  channel_groups, 
                  eps=1e-5, 
                  momentum=0.1,
-                 affine=True,
+                 affine=False,
                  track_running_stats=True):
         super().__init__()
         

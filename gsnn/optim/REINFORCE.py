@@ -45,7 +45,6 @@ class REINFORCE(torch.nn.Module):
     def update(self, rewards):
         
         self.rewards.append(rewards)
-        self.iteration += 1
 
         self.entropy = float(max(self.entropy * self.entropy_decay, self.min_entropy))
         if self.verbose: print(f'entropy value -> {self.entropy:.3f}', end='\r')
@@ -107,7 +106,8 @@ class REINFORCE(torch.nn.Module):
         self.update(rewards)
 
         # log best reward 
-        if (self.best_reward is None) or (rewards.mean() > self.best_reward.mean()): 
+        #if (self.best_reward is None) or (rewards.mean() > self.best_reward.mean()): 
+        if (self.best_reward is None) or (rewards > self.best_reward.mean()): 
             self.best_reward = rewards
             self.best_action = action
 

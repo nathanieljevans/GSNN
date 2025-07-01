@@ -179,7 +179,7 @@ class Environment():
             reward = self.train(edge_index_dict)
         except: 
             # failed trials will result in low reward; e.g., nan divergences
-            reward = -1
+            reward = [-1]
             if self.raise_error_on_fail: raise
 
         return reward
