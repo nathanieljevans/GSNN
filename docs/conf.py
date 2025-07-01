@@ -62,4 +62,8 @@ intersphinx_mapping = {
 myst_enable_extensions = [
     'deflist',
     'colon_fence',
-] 
+]
+
+# -- nbsphinx options ---------------------------------------------------------
+
+nbsphinx_execute = 'never' 
