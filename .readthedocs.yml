@@ -1,14 +1,21 @@
 version: 2
 
+build:
+  os: ubuntu-22.04  # RTD base image (required)
+  tools:
+    python: "3.11"
+
+# Sphinx builder
 sphinx:
   configuration: docs/conf.py
 
 python:
   install:
+    # Install the project in editable mode with [docs] extras for optional deps
     - method: pip
       path: .
-  extra_requirements:
-    - docs
-
-build:
-  image: latest 
+      extra_requirements:
+        - docs
+    # Additionally install docs/requirements.txt to grab pinned versions,
+    # including pyg_sphinx_theme pulled from GitHub.
+    - requirements: docs/requirements.txt 
