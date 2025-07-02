@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.abspath('..'))
 
 # -- Project information -----------------------------------------------------
 
-project = 'GSNN'
-author = 'GSNN Authors'
+project = 'Graph Structured Neural Networks'
+author = 'Nathaniel Evans'
 copyright = f"{datetime.now().year}, {author}"
 
 # Ideally, this is dynamically imported from the package
@@ -31,6 +31,20 @@ extensions = [
 ]
 
 autosummary_generate = True
+
+# Mock heavy optional dependencies so that Read the Docs can build without
+# having to compile/install the full deep-learning stack.
+autodoc_mock_imports = [
+    "torch",
+    "torch_geometric",
+    "torch_sparse",
+    "torch_scatter",
+    "torch_cluster",
+    "pyg_lib",
+    "pyro",
+    "pyro_ppl",
+    "numpy",
+]
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
