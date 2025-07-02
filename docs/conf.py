@@ -31,6 +31,7 @@ extensions = [
 ]
 
 autosummary_generate = True
+autosummary_imported_members = True  # create stub pages for attributes re-exported at import time
 
 # Mock heavy optional dependencies so that Read the Docs can build without
 # having to compile/install the full deep-learning stack.
@@ -80,4 +81,12 @@ myst_enable_extensions = [
 
 # -- nbsphinx options ---------------------------------------------------------
 
-nbsphinx_execute = 'never' 
+nbsphinx_execute = 'never'
+
+# Include detailed member documentation automatically
+autodoc_default_options = {
+    "members": True,
+    "undoc-members": True,
+    "inherited-members": True,
+    "show-inheritance": True,
+} 

@@ -25,14 +25,12 @@ A curated collection of **step-by-step notebooks** that demonstrate GSNN's capab
 
    * - Tutorial
      - What you'll learn
-   * - :doc:`Development notebook <00_dev>`
-     - Rapid prototyping and debugging of GSNN layers inside a development environment.
-   * - :doc:`Getting started (basic workflow) <01_basic>`
+   * - :doc:`Getting started (general premise) <01_basic>`
      - Build and train a minimal GSNN model—your "Hello, graphs!" introduction.
    * - :doc:`Simulating structured data <02_simulate>`
      - Use GSNN to simulate graph dynamics over time.
    * - :doc:`Comparing to baseline GNNs <03_comparison>`
-     - Measure GSNN expressiveness and performance against standard GNN architectures.
+     - Measure GSNN  performance against standard  baselines.
    * - :doc:`Reinforcement learning with GSNN <04_reinforce>`
      - Combine GSNN with RL to learn optimal prior-knowledge selection on graphs.
    * - :doc:`Bayesian optimisation <05_bayesopt>`
