@@ -13,6 +13,5 @@ The API reference will be automatically generated from the GSNN source code.
    :toctree: generated
    :recursive:
 
-   # Example:
-   gsnn.models
-   gsnn.simulate
+   gsnn.models.GSNN
+   gsnn.simulate.simulate
