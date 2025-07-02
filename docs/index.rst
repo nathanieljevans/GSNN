@@ -12,10 +12,12 @@ The **Graph Structured Neural Networks (GSNN)** library provides flexible and sc
    introduction/index
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Tutorials
+   :titlesonly:
+   :glob:
 
-   tutorials/index
+   tutorials/[0-1][0-9]*
 
 .. toctree::
    :maxdepth: 3
