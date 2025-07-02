@@ -1,29 +1,50 @@
-
 import pyro
 import pyro.distributions as dist
 import torch
 import numpy as np
 import networkx as nx
+from typing import Optional, Dict
 
 from gsnn.simulate import utils
 
-def simulate(G, n_train, n_test, input_nodes, output_nodes, noise_scale=1, special_functions=None):
-    """
-    Simulates data using a Pyro Bayesian network based on a NetworkX directed graph.
-    
-    Parameters:
-    G (networkx.DiGraph): A directed graph representing the Bayesian network structure.
-    n_train (int): The number of training samples to generate.
-    n_test (int): The number of test samples to generate.
-    input_nodes (list): A list of input node names.
-    output_nodes (list): A list of output node names.
-    special_functions (dict): A dictionary of special functions for specific nodes.
-    
+def simulate(G, n_train: int, n_test: int, input_nodes, output_nodes, *, noise_scale: float = 1.0,
+            special_functions: Optional[Dict] = None):
+    r"""Generate samples from a *synthetic* graph-structured data-generation process.
+
+    The function takes a directed NetworkX graph that represents causal
+    relationships between **input**, **function**, and **output** nodes.  It
+    converts the graph into a *Pyro* probabilistic program (via
+    :pyfunc:`gsnn.simulate.utils.nx_to_pyro_model`) and then draws IID samples
+    from that model.
+
+    Args:
+        G (networkx.DiGraph): Directed graph encoding the Bayesian network
+            structure.
+        n_train (int): Number of training instances to simulate.
+        n_test (int): Number of test instances to simulate.
+        input_nodes (list[str]): Ordered list of node names that are treated as
+            **inputs** (observed variables).
+        output_nodes (list[str]): Ordered list of node names that are treated
+            as **outputs** (targets).
+        noise_scale (float, optional): Standard deviation of the additive
+            Gaussian noise term used for every conditional distribution that
+            has no *special function* attached. **Default:** ``1.0``.
+        special_functions (dict[str, callable], optional): Mapping from node
+            name to a Python callable that overrides the default linear
+            relationship for that node.  Each callable must have the signature
+
+            ``f(*parents: Tensor, noise: Tensor) -> Tensor``.
+
+    Shapes:
+        - **x_train** – :math:`(n_{\text{train}}, |\text{inputs}|)`
+        - **y_train** – :math:`(n_{\text{train}}, |\text{outputs}|)`
+        - **x_test** – :math:`(n_{\text{test}}, |\text{inputs}|)`
+        - **y_test** – :math:`(n_{\text{test}}, |\text{outputs}|)`
+
     Returns:
-    x_train (numpy.ndarray): Training inputs (ordered as input_nodes).
-    y_train (numpy.ndarray): Training outputs (ordered as output_nodes).
-    x_test (numpy.ndarray): Test inputs (ordered as input_nodes).
-    y_test (numpy.ndarray): Test outputs (ordered as output_nodes).
+        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        ``(x_train, y_train, x_test, y_test)`` where each element is a dense
+        NumPy array ordered according to ``input_nodes`` / ``output_nodes``.
     """
     
     # Convert the NetworkX graph into a Pyro model with special functions

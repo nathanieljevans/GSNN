@@ -12,22 +12,30 @@ import warnings
 
 
 def hetero2homo(edge_index_dict, node_names_dict): 
-    """
-    Convert heterogeneous graph edges into a homogeneous edge_index representation.
+    r"""Convert a heterogeneous GSNN graph into a single COO *edge_index*.
+
+    The GSNN pipeline distinguishes three edge types::
+
+        ('input', 'to', 'function')
+        ('function', 'to', 'function')
+        ('function', 'to', 'output')
+
+    This function stacks those edge sets into one homogeneous graph and returns
+    boolean masks that let you recover the original node semantics.
 
     Args:
-        edge_index_dict (dict): A dictionary of edge types to edge_index tensors.
-        node_names_dict (dict): A dictionary mapping node types ('input', 'function', 'output') 
-                                to lists of node names.
+        edge_index_dict (dict[tuple, Tensor]): Edge-type mapping where each
+            value is a :obj:`LongTensor` with shape :obj:`[2, E_t]`.
+        node_names_dict (dict[str, list[str]]): Mapping ``'input'`` /
+            ``'function'`` / ``'output'`` → list of node names.
+
+    Shapes:
+        - **edge_index** – :math:`(2, E)`
+        - **input_node_mask / output_node_mask** – :math:`(N,)`
 
     Returns:
-        edge_index (torch.Tensor): A 2D tensor of shape (2, E) representing the homogeneous edge indices.
-        input_node_mask (torch.Tensor): A boolean mask indicating which nodes are input nodes.
-        output_node_mask (torch.Tensor): A boolean mask indicating which nodes are output nodes.
-        num_nodes (int): The total number of nodes in the homogeneous graph.
-
-    Notes:
-        ??? If uncertain about exact indexing conventions, please refer to ???
+        Tuple[Tensor, Tensor, Tensor, int, list[str]]:
+        ``(edge_index, input_mask, output_mask, num_nodes, homo_names)``.
     """
 
     # convert edge_index_dict to edge_index (homogenous)
@@ -62,20 +70,25 @@ def hetero2homo(edge_index_dict, node_names_dict):
 
 
 def get_Win_indices(edge_index, channels, function_nodes): 
-    """
-    Compute the indices used to construct the input linear transformation matrix (W_in).
+    r"""Build sparse COO indices for the *input* weight matrix :math:`W_{in}`.
 
     Args:
-        edge_index (torch.Tensor): A 2D tensor (2, E) representing the homogeneous edge indices.
-        channels (int): The number of hidden channels per function node, or ??? if variable.
-        function_nodes (torch.Tensor): A 1D tensor containing the indices of function nodes.
+        edge_index (Tensor): Homogeneous edge index with shape :obj:`[2, E]`.
+        channels (int | Tensor): If *int*, every function node gets the same
+            number of hidden channels.  If 1-D tensor/array, it must contain
+            the per-node channel count of length :math:`N`.
+        function_nodes (Tensor): Index list of nodes that represent *functions*.
+
+    Shapes:
+        - **edge_index** – :math:`(2, E)`
+        - **indices** – :math:`(2, \text{nnz})`
 
     Returns:
-        indices (torch.Tensor): A 2D tensor of shape (2, ???) for sparse indexing of W_in.
-        _channels (numpy.ndarray): An array containing the number of channels assigned to each node.
-
-    Notes:
-        ??? Clarify if channels differ per function node or are uniform.
+        tuple[Tensor, np.ndarray]: *(indices, channel_count)* where
+        **indices** are the coordinates required by
+        :class:`torch.sparse_coo_tensor` to build :math:`W_{in}` and
+        **channel_count** is a NumPy array of per-node channels for later
+        reuse.
     """
 
     # channels should be of size (Num_Nodes)

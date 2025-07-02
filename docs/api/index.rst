@@ -14,5 +14,5 @@ The API reference will be automatically generated from the GSNN source code.
    :recursive:
 
    # Example:
-   # gsnn.data
-   # gsnn.models 
+   gsnn.models
+   gsnn.simulate
