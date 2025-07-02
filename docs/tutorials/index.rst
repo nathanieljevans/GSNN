@@ -7,7 +7,6 @@ A curated collection of **step-by-step notebooks** that demonstrate GSNN's capab
    :maxdepth: 1
    :hidden:
 
-   00_dev
    01_basic
    02_simulate
    03_comparison
@@ -28,9 +27,9 @@ A curated collection of **step-by-step notebooks** that demonstrate GSNN's capab
    * - :doc:`Getting started (general premise) <01_basic>`
      - Build and train a minimal GSNN model—your "Hello, graphs!" introduction.
    * - :doc:`Simulating structured data <02_simulate>`
-     - Use GSNN to simulate graph dynamics over time.
-   * - :doc:`Comparing to baseline GNNs <03_comparison>`
-     - Measure GSNN  performance against standard  baselines.
+     - Use GSNN to simulate graphical models.
+   * - :doc:`Comparing to baselines <03_comparison>`
+     - Measure GSNN  performance against standard baselines.
    * - :doc:`Reinforcement learning with GSNN <04_reinforce>`
      - Combine GSNN with RL to learn optimal prior-knowledge selection on graphs.
    * - :doc:`Bayesian optimisation <05_bayesopt>`
@@ -39,12 +38,6 @@ A curated collection of **step-by-step notebooks** that demonstrate GSNN's capab
      - Speed up training and reduce memory with checkpointing and the new ``torch.compile``.
    * - :doc:`Uncertainty quantification <07_UQ_with_HyperNetworks>`
      - Estimate prediction uncertainty via hyper-network weight sampling.
-   * - :doc:`Optimal transport on graphs <08_optimal_transport_with_gsnn>`
-     - Solve optimal transport problems using GSNN layers.
-   * - :doc:`Inferring missing edges <09_inferring_missing_input_edges>`
-     - Reconstruct missing or corrupted edges with generative GSNNs.
-   * - :doc:`Iterative weight pruning <10_iterative_weight_pruning>`
-     - Compress GSNN models by pruning weights while maintaining accuracy.
 
 .. admonition:: Adding new tutorials
 
