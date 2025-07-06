@@ -59,7 +59,7 @@ Core Features
 
 **Training Options**
     - Gradient checkpointing for memory efficiency
-    - Multiple normalization strategies (Layer, Batch, Group)
+    - Multiple normalization strategies (Layer, Batch)
     - Residual connections to improve training stability
     - Support for various activation functions and weight initialization strategies
 
@@ -75,6 +75,19 @@ Core Features
     - Entity function extraction
 
 
+How are GSNNs different from graph neural networks?
+-------------------------------------------------
+
+While both GSNNs and Graph Neural Networks (GNNs) use graphs, they serve fundamentally different purposes and operate in distinct ways:
+
+**GNNs: Learning from Graph Structure**
+    Traditional GNNs treat the graph as data to learn from. They use permutation-invariant aggregation functions to learn local patterns and node representations and can often generalize to new, unseen graphs.
+
+**GSNNs: Constraining with Graph Structure**
+    GSNNs use the graph structure as a constraint mechanism rather than learning target. The graph defines which variables can directly influence each other, applying inductive biases through feature constraints. GSNNs are transductive—they are trained on a single graph and cannot be applied to new graphs. 
+
+**Key Distinction**
+    This distinction is critical when choosing between approaches. In biological signaling, for example, similar local network structures may produce drastically different signaling patterns. While the network structure is useful for understanding causal interactions, the graph patterns themselves are not necessarily predictive of signaling behaviors. GSNNs leverage this domain knowledge to constrain the model architecture, while GNNs are likely to try to map similar local graph structures to signaling patterns, which i .
 
 Getting Started
 --------------
