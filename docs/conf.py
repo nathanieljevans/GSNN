@@ -82,6 +82,48 @@ myst_enable_extensions = [
 # -- nbsphinx options ---------------------------------------------------------
 
 nbsphinx_execute = 'never'
+nbsphinx_allow_errors = True
+nbsphinx_prolog = """
+.. raw:: html
+
+    <style>
+        .nbinput .prompt,
+        .nboutput .prompt {
+            display: none;
+        }
+    </style>
+"""
+
+nbsphinx_epilog = """
+.. raw:: html
+
+    <script>
+        // Remove automatic TOC generation from notebooks
+        document.addEventListener('DOMContentLoaded', function() {
+            var toc = document.querySelector('.toctree-wrapper');
+            if (toc && toc.querySelector('.toctree-l1')) {
+                var items = toc.querySelectorAll('.toctree-l1');
+                items.forEach(function(item) {
+                    if (item.querySelector('.toctree-l2')) {
+                        item.querySelector('.toctree-l2').remove();
+                    }
+                });
+            }
+        });
+    </script>
+"""
+
+# Disable automatic TOC generation for notebooks
+nbsphinx_thumbnails = {}
+nbsphinx_thumbnails_title = "Gallery"
+
+# Prevent automatic section numbering and TOC generation
+nbsphinx_number_source = False
+nbsphinx_use_mathjax = True
+
+# Disable automatic TOC generation
+nbsphinx_include_source = True
+nbsphinx_include_mathjax = False
 
 # Include detailed member documentation automatically
 autodoc_default_options = {

@@ -5,6 +5,7 @@ A curated collection of **step-by-step notebooks** that demonstrate GSNN's capab
 
 .. toctree::
    :maxdepth: 1
+   :titlesonly:
 
    01_basic
    02_simulate
