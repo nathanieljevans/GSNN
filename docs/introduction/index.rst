@@ -1,12 +1,15 @@
 Introduction
 ============
 
+
 What is GSNN?
 -------------
 
 **Graph Structured Neural Networks (GSNN)** is a novel approach that incorporates prior knowledge of latent variable interactions directly into neural network architecture. Unlike traditional neural networks that learn relationships from data alone, GSNN leverages domain-specific knowledge to guide the learning process, making it particularly powerful for applications in perturbation biology and other domains where prior knowledge about variable relationships is available.
 
 The GSNN method was introduced in the paper "Graph Structured Neural Networks for Perturbation Biology" (Evans et al., 2024) and provides a framework for building interpretable, structured neural networks that respect known biological or domain relationships.
+
+
 
 Key Concepts
 -----------
@@ -27,6 +30,8 @@ Key Concepts
 **Perturbation Biology Applications**
     GSNN is particularly well-suited for perturbation biology studies where you want to understand how interventions (perturbations) affect biological systems. The graph structure can encode known biological pathways, protein-protein interactions, or regulatory networks.
 
+
+
 Why Use GSNN?
 -------------
 
@@ -42,6 +47,8 @@ Why Use GSNN?
 **Flexible Architecture**
     GSNN supports various normalization strategies, activation functions, and can be combined with advanced techniques like uncertainty quantification, reinforcement learning, and Bayesian optimization.
 
+
+
 Core Features
 ------------
 
@@ -49,20 +56,25 @@ Core Features
     - Define custom graph structures representing your domain knowledge
     - Automatic handling of sparse connectivity patterns
 
+
 **Training Options**
     - Gradient checkpointing for memory efficiency
     - Multiple normalization strategies (Layer, Batch, Group)
     - Residual connections to improve training stability
     - Support for various activation functions and weight initialization strategies
 
+
 **Optimization and Inference**
     - Reinforcement learning or Bayesian optimization for graph structure optimization
     - Uncertainty quantification through hypernetworks'
     - Weight pruning to improve inference speeds and model size 
 
+
 **Interpretation Tools**
     - Model explanation and visualization (GSNNExplainer)
     - Entity function extraction
+
+
 
 Getting Started
 --------------
@@ -74,6 +86,8 @@ The GSNN library provides comprehensive tutorials to help you get started:
 - **Comparison**: Compare GSNN performance against baseline methods
 - **Advanced Features**: Explore reinforcement learning, Bayesian optimization, and uncertainty quantification
 
+
+
 Installation
 -----------
 
@@ -84,6 +98,8 @@ Create the conda/mamba environment and install GSNN:
    mamba env create -f environment.yml
    conda activate gsnn
    pip install -e .
+
+
 
 Citation
 --------
@@ -102,6 +118,8 @@ If you use GSNN in your research, please cite:
        URL = {https://www.biorxiv.org/content/early/2024/02/29/2024.02.28.582164},
        journal = {bioRxiv}
    }
+
+
 
 Next Steps
 ----------
