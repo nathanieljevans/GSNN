@@ -13,10 +13,8 @@ channels:
 dependencies:
     - python
     - matplotlib
-    - numpy==1.26
     - pyg
     - pytorch
-    - pytorch-cuda
     - seaborn
     - scikit-learn
     - h5py
