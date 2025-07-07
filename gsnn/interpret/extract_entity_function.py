@@ -10,18 +10,45 @@ class dense_func_node(torch.nn.Module):
         super().__init__()
         self.lin_in = lin_in
         self.lin_out = lin_out
-        self.nonlin = nonlin 
-        
-        if norm == 'layer': 
-            channels = lin_in.weight.data.size(1)
+        # `nonlin` may be an instantiated module or a class – handle both
+        self.nonlin = nonlin if isinstance(nonlin, torch.nn.Module) else nonlin()
+
+        channels = lin_in.out_features  # hidden channels produced by `lin_in`
+
+        # ------------------------------------------------------------------
+        # Normalisation layers (mirrors gsnn.models.GSNN.ResBlock logic)
+        # ------------------------------------------------------------------
+        if norm == 'layer':
             self.norm = torch.nn.LayerNorm(channels, elementwise_affine=False)
+            self.norm_first = True
+        elif norm == 'batch':
+            self.norm = torch.nn.BatchNorm1d(channels, eps=1e-3, affine=False)
+            self.norm_first = True
+        elif norm in ('groupbatch', 'edgebatch'):
+            # For extracted single-node functions there is no meaningful group/edge
+            # structure anymore – fall back to Identity so the operation is a no-op.
+            self.norm = torch.nn.Identity()
+            self.norm_first = True
+        elif norm == 'softmax':
+            # Approximate SoftmaxGroupNorm with per-feature softmax.
+            self.norm = torch.nn.Softmax(dim=1)
+            self.norm_first = False  # match ResBlock behaviour
+        elif norm == 'none':
+            self.norm = torch.nn.Identity()
+            self.norm_first = True
+        else:
+            raise ValueError(f"Unrecognized norm type '{norm}'")
 
     def forward(self, x):
+        """Forward pass reproducing ResBlock ordering of norm / nonlin."""
         x = self.lin_in(x)
-        if hasattr(self, 'norm'): x = self.norm(x)
-        x = self.nonlin(x)
+        if self.norm_first:
+            x = self.norm(x)
+            x = self.nonlin(x)
+        else:
+            x = self.nonlin(x)
+            x = self.norm(x)
         x = self.lin_out(x) 
-
         return x
 
 
@@ -83,8 +110,10 @@ def extract_entity_function(node, model, data, layer=0):
     
     w1_smol = scipy.sparse.coo_array((values.detach(), (indices[0,:].detach(), indices[1,:].detach())), shape=(len(input_edges), N_channels)).todense()
     
-    if hasattr(model.ResBlocks[layer].lin_in, 'bias'): 
-        w1_bias = model.ResBlocks[layer].lin_in.bias[output_edges].detach().numpy()
+    if hasattr(model.ResBlocks[layer].lin_in, 'bias'):
+        # Bias vector is defined per hidden channel (out_features). Select
+        # the channels that belong to the current node (hidden_idxs).
+        w1_bias = model.ResBlocks[layer].lin_in.bias[hidden_idxs].detach().numpy()
     else: 
         w1_bias = None
 
@@ -109,7 +138,7 @@ def extract_entity_function(node, model, data, layer=0):
     lin3_smol.weight = torch.nn.Parameter(torch.tensor(w3_smol.T, dtype=torch.float32))
     if w3_bias is not None: lin3_smol.bias = torch.nn.Parameter(torch.tensor(w3_bias.squeeze(), dtype=torch.float32))
 
-    norm = 'layer' if hasattr(model, 'norm') else 'none'
+    norm = getattr(model, 'norm', 'none')
     func = dense_func_node(lin_in=lin1_smol, lin_out=lin3_smol, nonlin=model.ResBlocks[0].nonlin, norm=norm)
 
     meta = {'input_edge_names':inp_edge_names, 'output_edge_names':out_edge_names}
