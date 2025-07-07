@@ -92,7 +92,7 @@ While both GSNNs and Graph Neural Networks (GNNs) use graphs, they serve fundame
     GSNNs use the graph structure as a constraint mechanism rather than learning target. The graph defines which variables can directly influence each other, applying inductive biases through feature constraints. GSNNs are transductive—they are trained on a single graph and cannot be applied to new graphs. 
 
 **Key Distinction**
-    This distinction is critical when choosing between approaches. In biological signaling, for example, similar local network structures may produce drastically different signaling patterns. While the network structure is useful for understanding causal interactions, the graph patterns themselves are not necessarily predictive of signaling behaviors. GSNNs leverage this domain knowledge to constrain the model architecture, while GNNs are likely to try to map similar local graph structures to signaling patterns, which i .
+    This distinction is critical when choosing between approaches. In biological signaling, for example, similar local network structures may produce drastically different signaling patterns. While the network structure is useful for understanding causal interactions, the graph patterns themselves are not necessarily predictive of signaling behaviors. GSNNs leverage this domain knowledge to constrain the model architecture, while GNNs are likely to try to map similar local graph structures to signaling patterns.
 
 Getting Started
 --------------
