@@ -1,4 +1,3 @@
-
 import numpy as np
 import torch
 from torch.distributions.bernoulli import Bernoulli
@@ -79,9 +78,9 @@ class REINFORCE(torch.nn.Module):
             auroc = roc_auc_score(true_action, edge_probs)
             acc = ((edge_probs > 0.5) == true_action).mean()
             prob_true = self.prob_of(torch.from_numpy(true_action))
-            print(f'\t\t\t --> iter: {self.iteration} || auroc {auroc:0.3f} || acc: {acc:.3f} || prob(true_action): {prob_true:.3f} || last reward: {self.rewards[-1].mean():.3f}')
+            print(f'\t --> iter: {self.iteration} || auroc {auroc:0.3f} || acc: {acc:.3f} || prob(true_action): {prob_true:.3f} || last reward: {self.rewards[-1].mean():.3f}')
         else: 
-            print(f'\t\t\t --> iter: {self.iteration} || last reward: {self.rewards[-1].mean():.3f}')
+            print(f'\t --> iter: {self.iteration} || last reward: {self.rewards[-1].mean():.3f}')
 
     def step(self):
         '''
@@ -106,8 +105,7 @@ class REINFORCE(torch.nn.Module):
         self.update(rewards)
 
         # log best reward 
-        #if (self.best_reward is None) or (rewards.mean() > self.best_reward.mean()): 
-        if (self.best_reward is None) or (rewards > self.best_reward.mean()): 
+        if (self.best_reward is None) or (rewards.mean() > self.best_reward.mean()): 
             self.best_reward = rewards
             self.best_action = action
 
