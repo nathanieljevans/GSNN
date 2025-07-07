@@ -14,12 +14,12 @@ The architecture employs three types of nodes:
 
 Only *function nodes* are trainable; input and output nodes pass/receive information through the network unchanged.
 
-.. image:: ./gsnn_overview.png
+.. figure:: ./gsnn_overview.png
    :width: 100%
    :alt: GSNN Overview
    :align: center
-   
-   A toy example demonstrating how any given graph structure can be formulated as a feed forward neural network with masked weight matrices. Each yellow node in the left graph represents a fully-connected 1-layer neural network with two hidden channels (Note: function node neural networks can optionally be multi-layer). Panel A describes the structural graph ($\mathcal{G}$) which imposes constraints on the GSNN model. Panel B depicts how the edge latent values ($e_i$) can be updated in a single forward pass. Note that panel B shows sparse weight matrices, where the missing edge connections are equal to zero. The plus sign in panel B indicates a skip connection from the previous layer.
+
+   A toy example demonstrating how any given graph structure can be formulated as a feed-forward neural network with masked weight matrices. Each yellow node in the left graph represents a fully-connected one-layer neural network with two hidden channels (function nodes). Panel A shows the structural graph (:math:`\mathcal{G}`) that constrains the GSNN model, while panel B depicts how edge latent values (:math:`e_i`) are updated in a single forward pass. Sparse weight matrices omit nonexistent edges, and the ⊕ symbol indicates a residual connection from the previous layer.
 
 .. note::
     Unlike GNNs, where latent representations typically characterize the state of a *node*, GSNN latent representations characterize the state of an *edge*. This allows the GSNN method to learn nonlinear multivariate relationships between input edges and output edges and still be applicable to cyclic graphs.
