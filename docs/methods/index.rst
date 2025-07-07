@@ -4,7 +4,7 @@ Methods
 Graph Structured Neural Network (GSNN)
 --------------------------------------
 
-Graph Structured Neural Networks (GSNN) are designed to model biological signalling networks by **constraining** a neural network with the structure described by auser-defined *graph* :math:`\mathcal{G}`.  The graph encodes the molecular entities (*nodes*) and their interactions (*edges*), thereby defining which variables may directly influence each other during learning.
+Graph Structured Neural Networks (GSNN) were originally designed to model biological signalling networks by **constraining** a neural network with the structure described by a user-defined *graph* :math:`\mathcal{G}`.  The graph encodes the molecular entities (*nodes*) and their interactions (*edges*), thereby defining which variables may directly influence each other during learning.
 
 The architecture employs three types of nodes:
 
@@ -12,9 +12,9 @@ The architecture employs three types of nodes:
 * **Function nodes** – latent variables parameterised by neural networks
 * **Output nodes** – target variables
 
-Only *function nodes* are trainable; input and output nodes pass information through the network unchanged.
+Only *function nodes* are trainable; input and output nodes pass/receive information through the network unchanged.
 
-.. image:: ./GSNN_overview.png
+.. image:: ./gsnn_overview.png
    :width: 100%
    :alt: GSNN Overview
    :align: center
@@ -30,15 +30,15 @@ Each function node :math:`f_n` is implemented as a small fully-connected feed-fo
 
 * **Inputs**  – equal to the in-degree of node *n*
 * **Outputs** – equal to the out-degree of node *n*
-* **Hidden channels / layers** – user-defined hyper-parameters
+* **Hidden channels / layers** – user-defined hyper-parameters. While GSNN could theoretically use multi-layer neural networks to parameterize function nodes, we have found that single-layer networks are sufficient for most applications and currently do not support multi-layer networks.
 
 .. note::
-   *GSNN layers* (*L*) – sequential sparse linear layers that propagate information across the entire graph.
+    To avoid confusion, we use the term *layer* to refer to the number of sequential sparse linear layers that propagate information across the entire graph. The neural networks that parameterize function nodes are fixed to a single layer.
 
 
 Layer Updates with Masked Linear Layers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-A single GSNN layer updates **edge** representations via a *sparselinear operation*.  The weight matrix has shape :math:`(E, N \times C)` where
+A single GSNN layer updates **edge** representations via a *sparse linear operation*.  The weight matrix has shape :math:`(E, N \times C)` where
 
 * :math:`E` – number of edges in :math:`\mathcal{G}`
 * :math:`N` – number of function nodes
@@ -65,7 +65,11 @@ GSNN is [optionally] a residual architecture where the layer output is added to 
 
 Residual connections allow the model to learn *edge latency*—the temporal lag between upstream and downstream signals—and alleviate vanishing gradients in deep networks.
 
-* **Normalisation** – Instead of batch normalisation (ineffective with small batches), each function node applies **layer normalisation** to prevent data leakage across nodes.
+* **Normalisation** – We provide several normalization options:
+    * **None** – No normalization is applied.
+    * **Batch** – Batch normalization is applied to the entire graph. This approach works well for large batches and is applicable to small channel sizes.
+    * **Layer** – Layer normalization is applied within each function node. This approach works well for small batches with large channel sizes. 
+    * **Softmax** – Softmax normalization is applied to the entire graph.
 * **Self-edges** – Optional self-connections let a node incorporate its previous-layer state.
 * **Parameter sharing** – While GSNN supports weight sharing across layers, empirical results typically show better performance when each layer has its own parameters.
 
