@@ -1,6 +1,11 @@
 Introduction
 ============
 
+.. image:: ./GSNN_overview_07_07_25.png
+   :width: 100%
+   :alt: GSNN Overview
+   :align: center
+
 
 What is GSNN?
 -------------
