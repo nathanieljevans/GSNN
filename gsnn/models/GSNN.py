@@ -647,14 +647,17 @@ class GSNN(torch.nn.Module):
 
         if e0 is not None:
             x = x + e0
+        
+        # mask input edges (otherwise input edges get missed)
+        if edge_mask is not None: x = x*edge_mask
 
         if self.checkpoint and self.training: x.requires_grad_(True)
         for i, (mod,nerr) in enumerate(zip(modules, node_errs)): 
 
             if self.checkpoint and self.training: 
-                x = checkpoint(mod, x, batch_params, node_err=nerr, use_reentrant=False)
+                x = checkpoint(mod, x, batch_params, node_err=nerr, use_reentrant=False).squeeze(-1)
             else: 
-                x = mod(x, batch_params, node_err=nerr)
+                x = mod(x, batch_params, node_err=nerr).squeeze(-1)
 
             if edge_mask is not None: x = x*edge_mask
 

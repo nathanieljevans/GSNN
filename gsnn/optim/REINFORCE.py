@@ -21,7 +21,7 @@ class REINFORCE(torch.nn.Module):
         self.rewards = []
         self.iteration = 0
         self.verbose = verbose
-        self.window=window
+        self.window = window
         self.policy_decay = policy_decay
 
         # need to convert init prob to logit value 
@@ -32,8 +32,6 @@ class REINFORCE(torch.nn.Module):
 
         self.best_reward = None
         self.best_action = None
-
-        self.iteration = 0
 
     def sample(self):
 
@@ -98,7 +96,7 @@ class REINFORCE(torch.nn.Module):
         advantages = self.scale(rewards).mean()
 
         if len(self.rewards) >= self.warmup: 
-            loss = -(policy.log_prob(action) * advantages).sum() + self.entropy * policy.entropy().sum() + self.policy_decay*self.logits.sigmoid().mean()
+            loss = -(policy.log_prob(action) * advantages).sum() - self.entropy * policy.entropy().sum() + self.policy_decay*self.logits.sigmoid().mean()
             loss.backward()
             self.optim.step()
             

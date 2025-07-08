@@ -89,7 +89,7 @@ class Environment():
         gc.collect() 
         torch.cuda.empty_cache()
 
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device = 'cpu' #'cuda' if torch.cuda.is_available() else 'cpu'
         
         train_loader = DataLoader(self.train_dataset, batch_size=self.training_kwargs['batch'], num_workers=self.training_kwargs['workers'], shuffle=True, persistent_workers=True)
         val_loader = DataLoader(self.val_dataset, batch_size=self.training_kwargs['batch'], num_workers=self.training_kwargs['workers'], shuffle=False, persistent_workers=True)
@@ -124,14 +124,15 @@ class Environment():
 
             # since we have a multioutput prediction problem, we need to return multioutput performances 
 
+
             if self.metric == 'mse': 
                 val_score = -np.mean((y-yhat)**2, dim=0)
             elif self.metric == 'pearson': 
-                val_score = utils.corr_score(y, yhat, method='pearson', multioutput='raw_values')
+                val_score = utils.corr_score(y, yhat, method='pearson', multioutput='uniform_weighted')
             elif self.metric == 'spearman': 
-                val_score = utils.corr_score(y, yhat, method='spearman', multioutput='raw_values')
+                val_score = utils.corr_score(y, yhat, method='spearman', multioutput='uniform_weighted')
             elif self.metric == 'r2': 
-                val_score = np.clip(utils.corr_score(y, yhat, method='r2', multioutput='raw_values'),-1,1)
+                val_score = np.clip(utils.corr_score(y, yhat, method='r2', multioutput='uniform_weighted'), -1,1)
             else:
                 raise Exception('unrecognized `metric` type')
             
