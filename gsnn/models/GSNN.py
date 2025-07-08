@@ -427,13 +427,11 @@ class GSNN(torch.nn.Module):
             share_layers (bool, optional): If True, reuse the same layer parameters for all layers. Default is True.
             add_function_self_edges (bool, optional): If True, add self-edges for function nodes. Default is True.
             norm (str, optional): Normalization type ('layer', 'batch', 'softmax', 'none'). Default is 'layer'.
-            init (str, optional): Weight initialization ('kaiming', 'xavier', ???). Default is 'kaiming'.
+            init (str, optional): Weight initialization ('kaiming', 'xavier'). Default is 'kaiming'.
             verbose (bool, optional): If True, print debugging information. Default is False.
             edge_channels (int, optional): Number of latent edge feature channels to replicate. Default is 1.
             checkpoint (bool, optional): If True, use gradient checkpointing. Default is False.
-
-        Notes:
-            ??? Confirm if channels are uniform across all function nodes or variable.
+            residual (bool, optional): If True, use residual connections. Default is True.
         """
         super().__init__()
 

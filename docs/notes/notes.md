@@ -1,0 +1,4 @@
+
+07/08/2025 
+
+The results of 07_UQ_with_HyperrNetworks is interesting, after playing with it a bit, the GSNN tends to do much better than the NN with calibration,overfitting, and performance when working on noisy, small datasets. This aligns with the premise that we if we know the structure, we don't need as much data to learn the function. Should keep this in mind for what problems the GSNN is most applicable for, and perhaps more importantly, how can we improve the model so that it still performs comparably to NN in low noise, large datasetes - because here the NN starts to look  better. I would think that the GSNN should be robust to large datasets, but it is under confident in its predictions, and I'm not sure why, perhaps a information throttling issue due to the latent edges being smaller than the channel edges? 
