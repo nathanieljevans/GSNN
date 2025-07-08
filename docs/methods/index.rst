@@ -4,7 +4,7 @@ Methods
 Graph Structured Neural Network (GSNN)
 --------------------------------------
 
-Graph Structured Neural Networks (GSNN) were originally designed to model biological signalling networks by **constraining** a neural network with the structure described by a user-defined *graph* :math:`\mathcal{G}`.  The graph encodes the molecular entities (*nodes*) and their interactions (*edges*), thereby defining which variables may directly influence each other during learning.
+Graph Structured Neural Networks (GSNN) were originally designed to model biological signaling networks by **constraining** a neural network with the structure described by a user-defined *graph* :math:`\mathcal{G}`.  The graph encodes the molecular entities (*nodes*) and their interactions (*edges*), thereby defining which variables may directly influence each other during learning. The GSNN architecture is best conceptualized of as univariate edge features that are transformed over sequential layer operations. The transformations are constrained by the user-defined graph and the function nodes learn relationships between input and output edges. This approach effectively handles cyclic graphs and can scale to deep networks able to propagate information long distances through the graph.  
 
 The architecture employs three types of nodes:
 
@@ -21,6 +21,10 @@ Only *function nodes* are trainable; input and output nodes pass/receive informa
 
 A toy example demonstrating how any given graph structure can be formulated as a feed-forward neural network with sparse weight matrices. Each yellow node in the left graph represents a fully-connected one-layer neural network with two hidden channels (function nodes). Panel A shows the structural graph (:math:`\mathcal{G}`) that constrains the GSNN model, while panel B depicts how edge latent values (:math:`e_i`) are updated in a single forward pass. Sparse weight matrices omit nonexistent edges, and the ⊕ symbol indicates a residual connection from the previous layer.
 
+.. raw:: html
+
+   <br/>
+   
 .. note::
     Unlike GNNs, where latent representations typically characterize the state of a *node*, GSNN latent representations characterize the state of an *edge*. This allows the GSNN method to learn nonlinear multivariate relationships between input edges and output edges and still be applicable to cyclic graphs.
 
