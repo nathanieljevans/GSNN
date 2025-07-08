@@ -22,11 +22,11 @@ The GSNN method was introduced in the paper "Graph Structured Neural Networks fo
 Key Concepts
 -----------
 
-**Prior Knowledge Integration**
+Prior Knowledge Integration
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     GSNN allows you to encode domain-specific knowledge about how variables interact through a graph structure. This graph defines which variables can directly influence each other, constraining the neural network to learn only biologically or physically plausible relationships.
 
-**Three-Node Architecture**
+Three-Node Architecture
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
     GSNN uses a specialized three-node type architecture:
     
@@ -34,11 +34,11 @@ Key Concepts
     - **Function nodes**: Represent latent variables
     - **Output nodes**: Represent target variables
 
-**Sparse Connectivity**
+Sparse Connectivity
 ^^^^^^^^^^^^^^^^^^^^^^^
     The connections between nodes are sparse and determined by your prior knowledge graph, leading to more interpretable models and better generalization, especially in data-limited scenarios.
 
-**Perturbation Biology Applications**
+Perturbation Biology Applications
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     GSNN is particularly well-suited for perturbation biology studies where you want to understand how interventions (perturbations) affect biological systems. The graph structure can encode known biological pathways, protein-protein interactions, or regulatory networks.
 
@@ -46,19 +46,19 @@ Key Concepts
 Why Use GSNN?
 -------------
 
-**Interpretability**
+Interpretability
 ^^^^^^^^^^^^^^^^^^^^
     Unlike black-box neural networks, GSNN models are interpretable because the learned weights correspond to specific relationships in your prior knowledge graph. You can directly examine which connections are important for predictions.
 
-**Data Efficiency**
+Data Efficiency
 ^^^^^^^^^^^^^^^^^^^
     By incorporating prior knowledge, GSNN can learn meaningful relationships from smaller datasets than would be required for traditional neural networks.
 
-**Domain Knowledge Respect**
+Domain Knowledge constraints
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     GSNN ensures that your model respects known biological or physical constraints, preventing it from learning spurious correlations that violate domain knowledge.
 
-**Flexible Architecture**
+Flexible Architecture
 ^^^^^^^^^^^^^^^^^^^^^^^^^
     GSNN supports various normalization strategies, activation functions, and can be combined with advanced techniques like uncertainty quantification, reinforcement learning, and Bayesian optimization.
 
@@ -67,47 +67,43 @@ Why Use GSNN?
 Core Features
 ------------
 
-**Graph-Based Architecture**
+Graph-Based Architecture
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     - Define custom graph structures representing your domain knowledge
     - Automatic handling of sparse connectivity patterns
 
 
-**Training Options**
+Training Options
 ^^^^^^^^^^^^^^^^^^^^
     - Gradient checkpointing for memory efficiency
     - Multiple normalization strategies (Layer, Batch)
     - Residual connections to improve training stability
     - Support for various activation functions and weight initialization strategies
 
-
-**Optimization and Inference**
+Optimization and Inference
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    - Reinforcement learning or Bayesian optimization for graph structure optimization
-    - Uncertainty quantification through hypernetworks'
-    - Weight pruning to improve inference speeds and model size 
+    - Reinforcement learning for graph structure optimization
+    - Uncertainty quantification through hypernetworks
 
-
-**Interpretation Tools**
+Interpretation Tools
 ^^^^^^^^^^^^^^^^^^^^^^^^
     - Model explanation and visualization (GSNNExplainer)
     - Entity function extraction
-
 
 How are GSNNs different from graph neural networks?
 -------------------------------------------------
 
 While both GSNNs and Graph Neural Networks (GNNs) use graphs, they serve fundamentally different purposes and operate in distinct ways:
 
-**GNNs: Learning from Graph Structure**
+GNNs: Learning from Graph Structure
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Traditional GNNs treat the graph as data to learn from. They use permutation-invariant aggregation functions to learn local patterns and node representations and can often generalize to new, unseen graphs.
 
-**GSNNs: Constraining with Graph Structure**
+GSNNs: Constraining with Graph Structure
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     GSNNs use the graph structure as a constraint mechanism rather than learning target. The graph defines which variables can directly influence each other, applying inductive biases through feature constraints. GSNNs are transductive—they are trained on a single graph and cannot be applied to new graphs. 
 
-**Key Distinction**
+Example
 ^^^^^^^^^^^^^^^^^^^
     This distinction is critical when choosing between approaches. In biological signaling, for example, similar local network structures may produce drastically different signaling patterns. While the network structure is useful for understanding causal interactions, the graph patterns themselves are not necessarily predictive of signaling behaviors. GSNNs leverage this domain knowledge to constrain the model architecture, while GNNs are likely to try to map similar local graph structures to signaling patterns.
 
