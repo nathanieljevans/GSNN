@@ -11,7 +11,6 @@ A curated collection of **step-by-step notebooks** that demonstrate GSNN's capab
    02_simulate
    03_comparison
    04_reinforce
-   05_bayesopt
    06_checkpointing_and_compiling
    07_UQ_with_HyperNetworks
 
