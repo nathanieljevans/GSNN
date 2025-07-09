@@ -104,7 +104,7 @@ class GSNNExplainer:
             with torch.no_grad():
                 r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), out.detach().cpu().numpy().ravel())
 
-            if self.verbose: print(f'iter: {iter} | mse: {mse.item():.8f} | r2: {r2:.3f} | active edges: {(edge_weight > 0.5).sum().item()}', end='\r')
+            if self.verbose: print(f'iter: {iter} | mse: {mse.item():.8f} | r2: {r2:.3f} | active edges: {(edge_weight > 0.5).sum().item()} / {self.model.edge_index.size(1)} |', end='\r')
 
         edge_scores, _ = torch.nn.functional.softmax(edge_params.data, dim=0).detach().cpu().numpy()
        
