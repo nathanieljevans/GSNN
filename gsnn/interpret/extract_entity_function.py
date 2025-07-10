@@ -2,7 +2,6 @@ import torch
 import numpy as np 
 import torch_geometric as pyg 
 import scipy 
-import gsnn.models.utils as utils
 from gsnn.models.GSNN import get_conv_indices
 
 class dense_func_node(torch.nn.Module): 

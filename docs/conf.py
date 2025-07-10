@@ -45,6 +45,15 @@ autodoc_mock_imports = [
     "pyro",
     "pyro_ppl",
     "numpy",
+    # Additional optional heavy dependencies mocked for Read the Docs
+    "pandas",
+    "scipy",
+    "networkx",
+    "matplotlib",
+    "sklearn",
+    "sklearn.metrics",
+    "sklearn.linear_model",
+    "sklearn.preprocessing",
 ]
 
 templates_path = ['_templates']
