@@ -75,7 +75,7 @@ class SparseLinear(torch.nn.Module):
         n_in = fan_in[dst]      # number of input channels 
         n_out = fan_out[src]    # number of output channels 
         if init in ['xavier', 'glorot']:
-            std = (2/(n_in + n_out))**0.5
+            std = (2/(n_in + n_out))**0.5 
         elif init in ['kaiming', 'he']:
             std = (2/n_in)**(0.5)
         elif init == 'lecun': 
