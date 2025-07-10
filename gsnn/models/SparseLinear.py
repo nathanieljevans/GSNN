@@ -117,7 +117,7 @@ class SparseLinear(torch.nn.Module):
         edge_weight = self.values.expand(B, *self.values.shape).reshape(-1)
 
         if batched_indices is None: 
-            batched_indices, = batch_graphs(N=self.N, M=self.M, edge_index=self.indices, B=B, device=device)
+            batched_indices = batch_graphs(N=self.N, M=self.M, edge_index=self.indices, B=B, device=device)
 
         if hasattr(self, 'bias'):
             bias_idx = torch.arange(self.M, device=device).repeat(B)

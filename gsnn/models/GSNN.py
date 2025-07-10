@@ -201,6 +201,11 @@ def edge2node(x, edge_index, output_node_mask):
     src = x[:, output_edge_mask].view(B, -1)
     out = out.scatter_add(1, idx, src)
 
+    # this is only applicable if there are many edges per output node 
+    # user can define the graph structure to avoid this but jic... 
+    deg_in = torch.bincount(dst, minlength=out.size(1)).clamp_min(1)
+    out = out / deg_in.sqrt()
+
     return out
 
 
@@ -661,7 +666,7 @@ class GSNN(torch.nn.Module):
 
         # under assumption that each layer output is iid unit normal (weak assumption since layer outputs will be correlated)
         # then x = N(0,1) + N(0,1) + ... + N(0,1) = N(0, sqrt(layers))
-        if not self.residual: x = x / self.scale
+        if self.residual: x = x / self.scale
 
         if ret_edge_out: 
             return x

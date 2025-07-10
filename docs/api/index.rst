@@ -18,3 +18,8 @@ The API reference will be automatically generated from the GSNN source code.
    gsnn.models.GSNN
    gsnn.simulate
    gsnn.simulate.simulate
+   gsnn.interpret
+   gsnn.interpret.GSNNExplainer
+   gsnn.interpret.IGExplainer
+   gsnn.interpret.ContrastiveIGExplainer
+   gsnn.interpret.extract_entity_function
