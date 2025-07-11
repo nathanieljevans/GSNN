@@ -4,9 +4,40 @@ from torch.distributions.bernoulli import Bernoulli
 from sklearn.metrics import roc_auc_score
 
 class REINFORCE(torch.nn.Module): 
+
     def __init__(self, env, n_actions, action_labels=None, clip=10, eps=1e-5, warmup=3, verbose=True, 
                         entropy=0., entropy_decay=0.99, min_entropy=0.01, window=10,
                         init_prob=0.9, lr=1e-2, policy_decay=0.): 
+        """
+        REINFORCE algorithm for optimizing graph structure.
+
+        The REINFORCE algorithm is used to learn an optimal graph structure by treating edge selection
+        as a reinforcement learning problem. Each edge is treated as a binary action (include/exclude)
+        and the model is trained to maximize expected reward.
+
+        Args:
+            env (Environment): Environment object that handles model training and evaluation
+            n_actions (int): Number of binary actions (edges) to optimize
+            action_labels (array, optional): Ground truth binary labels for actions. Used for evaluation.
+            clip (float, optional): Clipping value for reward normalization. Default: 10
+            eps (float, optional): Small constant for numerical stability. Default: 1e-5
+            warmup (int, optional): Number of warmup iterations before policy updates. Default: 3
+            verbose (bool, optional): Whether to print progress. Default: True
+            entropy (float, optional): Initial entropy coefficient. Default: 0.
+            entropy_decay (float, optional): Decay rate for entropy coefficient. Default: 0.99
+            min_entropy (float, optional): Minimum entropy coefficient. Default: 0.01
+            window (int, optional): Window size for reward normalization. Default: 10
+            init_prob (float, optional): Initial probability for edge selection. Default: 0.9
+            lr (float, optional): Learning rate for policy optimization. Default: 1e-2
+            policy_decay (float, optional): L1 regularization coefficient for policy. Default: 0.
+
+        Example:
+            >>> env = Environment(action_edge_dict, train_dataset, test_dataset, model_kwargs, training_kwargs)
+            >>> reinforce = REINFORCE(env, n_actions=10, clip=10, entropy=0.1)
+            >>> for i in range(100):
+            >>>     reinforce.step()
+            >>> best_action = reinforce.best_action
+        """
         super().__init__()
 
         self.action_labels = action_labels
@@ -19,6 +50,7 @@ class REINFORCE(torch.nn.Module):
         self.eps = eps 
         self.warmup = warmup
         self.rewards = []
+        self.actions = []
         self.iteration = 0
         self.verbose = verbose
         self.window = window
@@ -39,9 +71,11 @@ class REINFORCE(torch.nn.Module):
         action = policy.sample()
         return action
 
-    def update(self, rewards):
+    def update(self, rewards, actions=None):
         
         self.rewards.append(rewards)
+        
+        if self.actions is not None: self.actions.append(actions.detach().cpu().numpy())
 
         self.entropy = float(max(self.entropy * self.entropy_decay, self.min_entropy))
         if self.verbose: print(f'entropy value -> {self.entropy:.3f}', end='\r')
@@ -81,13 +115,7 @@ class REINFORCE(torch.nn.Module):
             print(f'\t --> iter: {self.iteration} || last reward: {self.rewards[-1].mean():.3f}')
 
     def step(self):
-        '''
         
-        Args: 
-            logits       tensor         policy logits (n_actions,)
-            actions      list<array>    batch of actions (n_actions,)
-            rewards      list<array>    batch of unnormalized rewards (n_outputs,)
-        '''
         self.optim.zero_grad()
         policy = Bernoulli(logits=self.logits)
         action = policy.sample()
@@ -100,7 +128,7 @@ class REINFORCE(torch.nn.Module):
             loss.backward()
             self.optim.step()
             
-        self.update(rewards)
+        self.update(rewards, action)
 
         # log best reward 
         if (self.best_reward is None) or (rewards.mean() > self.best_reward.mean()): 

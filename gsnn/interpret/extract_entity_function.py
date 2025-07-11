@@ -18,16 +18,17 @@ class dense_func_node(torch.nn.Module):
         # Normalisation layers (mirrors gsnn.models.GSNN.ResBlock logic)
         # ------------------------------------------------------------------
         if norm == 'layer':
+            assert False, 'Layer norm not implemented for extracted single-node functions'
             self.norm = torch.nn.LayerNorm(channels, elementwise_affine=False)
             self.norm_first = True
+            # TODO: copy params from gsnn norm 
         elif norm == 'batch':
+            assert False, 'Batch norm not implemented for extracted single-node functions'
             self.norm = torch.nn.BatchNorm1d(channels, eps=1e-3, affine=False)
             self.norm_first = True
+            # TODO: copy params from gsnn norm 
         elif norm in ('groupbatch', 'edgebatch'):
-            # For extracted single-node functions there is no meaningful group/edge
-            # structure anymore – fall back to Identity so the operation is a no-op.
-            self.norm = torch.nn.Identity()
-            self.norm_first = True
+            raise NotImplementedError('Group/edge batch norm not implemented for extracted single-node functions')
         elif norm == 'softmax':
             # Approximate SoftmaxGroupNorm with per-feature softmax.
             self.norm = torch.nn.Softmax(dim=1)

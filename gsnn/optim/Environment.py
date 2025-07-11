@@ -41,11 +41,37 @@ def ema(values, alpha=2/(3+1)):
 
     return val
 
+
 class Environment(): 
 
     def __init__(self, action_edge_dict, train_dataset, val_dataset, model_kwargs, 
                  training_kwargs, metric='spearman', reward_type='auc', verbose=True,
                  raise_error_on_fail=False): 
+        """
+        Environment for training and evaluating graph neural networks with different edge configurations.
+
+        This environment handles the training and evaluation of graph neural networks with different edge
+        configurations. It is used in conjunction with the REINFORCE algorithm to optimize graph structure.
+
+        Args:
+            action_edge_dict (dict): Dictionary mapping edge types to action indices
+            train_dataset (Dataset): Training dataset
+            val_dataset (Dataset): Validation dataset
+            model_kwargs (dict): Model configuration parameters
+            training_kwargs (dict): Training configuration parameters
+            metric (str, optional): Metric for model evaluation. One of ['spearman', 'mse', 'pearson', 'r2']. Default: 'spearman'
+            reward_type (str, optional): Type of reward signal. One of ['auc', 'best', 'last']. Default: 'auc'
+            verbose (bool, optional): Whether to print training progress. Default: True
+            raise_error_on_fail (bool, optional): Whether to raise errors on training failures. Default: False
+
+        Example:
+            >>> action_edge_dict = {('input', 'to', 'function'): torch.arange(n_edges)}
+            >>> env = Environment(action_edge_dict, train_dataset, val_dataset, 
+            ...                  model_kwargs={'channels': 64}, 
+            ...                  training_kwargs={'lr': 0.01})
+            >>> action = torch.ones(n_edges)
+            >>> reward = env.run(action)
+        """
         
         self.action_edge_dict = action_edge_dict
         self.train_dataset = train_dataset 

@@ -23,3 +23,8 @@ The API reference will be automatically generated from the GSNN source code.
    gsnn.interpret.IGExplainer
    gsnn.interpret.ContrastiveIGExplainer
    gsnn.interpret.extract_entity_function
+   gsnn.optim
+   gsnn.optim.REINFORCE
+   gsnn.optim.Environment
+   gsnn.optim.RewardScaler 
+   gsnn.optim.EarlyStopper

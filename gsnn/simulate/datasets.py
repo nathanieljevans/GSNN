@@ -3,7 +3,7 @@ import numpy as np
 import torch 
 from gsnn.simulate.simulate import simulate
 
-def simulate_3_in_3_out(n_train, n_test, noise_scale=0.1, device='cpu'): 
+def simulate_3_in_3_out(n_train, n_test, noise_scale=0.1, device='cpu', zscorey=False): 
 
     G = nx.DiGraph()
 
@@ -38,10 +38,10 @@ def simulate_3_in_3_out(n_train, n_test, noise_scale=0.1, device='cpu'):
     y_train = torch.tensor(y_train, dtype=torch.float32).to(device)
     y_test = torch.tensor(y_test, dtype=torch.float32).to(device)
 
-    y_mu = y_train.mean(0); y_std = y_train.std(0)
-
-    y_train = (y_train - y_mu)/(y_std + 1e-8)
-    y_test = (y_test - y_mu)/(y_std + 1e-8)
+    if zscorey: 
+        y_mu = y_train.mean(0); y_std = y_train.std(0)
+        y_train = (y_train - y_mu)/(y_std + 1e-8)
+        y_test = (y_test - y_mu)/(y_std + 1e-8)
 
     return G, pos, x_train, x_test, y_train, y_test, input_nodes, function_nodes, output_nodes
         

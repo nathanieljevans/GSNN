@@ -1,7 +1,3 @@
-'''
-Running window reward z-score 
-'''
-
 import numpy as np 
 
 def edw(N, alpha):
@@ -15,6 +11,26 @@ def edw(N, alpha):
 
 class RewardScaler:
     def __init__(self, clip=5, eps=1e-3, alpha=0.04, warmup=3):
+        """
+        Reward scaling with exponential moving average statistics.
+
+        Scales rewards using a running mean and standard deviation computed with exponential decay weights.
+        This helps stabilize training by normalizing the reward distribution.
+
+        Args:
+            clip (float, optional): Maximum absolute value for scaled rewards. Default: 5
+            eps (float, optional): Small constant for numerical stability. Default: 1e-3
+            alpha (float, optional): Decay rate for exponential moving average. Default: 0.04
+            warmup (int, optional): Number of updates before using computed statistics. Default: 3
+
+        Example:
+            >>> scaler = RewardScaler(clip=5, alpha=0.1)
+            >>> for i in range(100):
+            ...     reward = get_reward()
+            ...     scaler.update(reward)
+            ...     scaled_reward = scaler.scale(reward)
+        """
+
         self.rewards = []
         self.eps = eps
         self.clip = clip
