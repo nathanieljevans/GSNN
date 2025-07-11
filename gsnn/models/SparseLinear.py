@@ -88,7 +88,7 @@ class SparseLinear(torch.nn.Module):
         self.init_var = std**2
 
         # scale normal distribution
-        values = torch.randn(indices.size(1), dtype=dtype)
+        values = torch.randn(indices.size(1), dtype=dtype) # normal distribution 
         values *= std # N(mean, std)
 
         self.values = torch.nn.Parameter(values) # torch optimizer require dense parameters 
