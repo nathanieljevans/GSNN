@@ -1,5 +1,5 @@
 import copy
-from typing import Union, List
+from typing import Union, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -81,6 +81,8 @@ class ContrastiveIGExplainer:
         x1: torch.Tensor,
         x2: torch.Tensor,
         target_idx: Union[int, List[int]],
+        *,
+        jitter: Optional[torch.Tensor] = None,
     ) -> pd.DataFrame:
         """Compute edge attributions for *f(x₁) − f(x₂)*.
 
@@ -100,8 +102,19 @@ class ContrastiveIGExplainer:
         T = self.n_steps + 1  # number of points along the path (baseline included)
         alphas = torch.linspace(0.0, 1.0, T, device=self.device).view(-1, 1)  # (T,1)
 
-        # mask_path shape: (T , E)  –  each row is α * 1
-        mask_path = (alphas * torch.ones((1, self.E), device=self.device)).requires_grad_(True)
+        # -------------------------------------------------------------
+        # Optionally perturb the straight-line mask with *jitter*
+        # -------------------------------------------------------------
+        base_mask = torch.ones((1, self.E), device=self.device)
+        if jitter is not None:
+            jitter = jitter.to(self.device)
+            if jitter.dim() == 1:
+                jitter = jitter.unsqueeze(0)
+            # multiplicative perturbation, then clip
+            base_mask = torch.clamp(base_mask * (1.0 + jitter), 0.0, 1.0)
+
+        # mask_path shape: (T , E)
+        mask_path = (alphas * base_mask).requires_grad_(True)
 
         # ------------------------------------------------------------------
         # 2.  Prepare constant feature batches (x1, x2) replicated along path

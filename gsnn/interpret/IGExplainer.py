@@ -1,7 +1,8 @@
-import numpy as np 
-import torch 
-import copy 
-import pandas as pd 
+import numpy as np
+import torch
+import copy
+import pandas as pd
+from typing import Optional
 
 
 class IGExplainer:
@@ -56,7 +57,7 @@ class IGExplainer:
         self.baseline = torch.zeros((1, self.E), device=self.device) if baseline is None else baseline.to(self.device)
         
 
-    def explain(self, x, target_idx): 
+    def explain(self, x, target_idx, *, jitter: Optional[torch.Tensor] = None):
         '''
 
         Following approach and style from: https://github.com/ankurtaly/Integrated-Gradients/blob/master/IntegratedGradients/integrated_gradients.py
@@ -81,11 +82,22 @@ class IGExplainer:
 
         '''
 
+        # -------------------------------------------------------------
+        # 0.  Optionally perturb the baseline with *jitter*
+        # -------------------------------------------------------------
+        if jitter is not None:
+            jitter = jitter.to(self.device)
+            if jitter.dim() == 1:
+                jitter = jitter.unsqueeze(0)  # make shape (1,E)
+            baseline_ = torch.clamp(self.baseline + jitter, 0.0, 1.0)
+        else:
+            baseline_ = self.baseline
+
         # alphas: 0 … 1 (inclusive). We include both baseline (0) and full input (1).
-        alphas   = torch.linspace(0., 1., self.n_steps + 1, device=self.device).view(-1, 1)
+        alphas = torch.linspace(0.0, 1.0, self.n_steps + 1, device=self.device).view(-1, 1)
 
         # Build a stack of interpolated edge-masks along the batch dimension
-        edge_masks = self.baseline + alphas * (1. - self.baseline)   # (n_steps+1 , E)
+        edge_masks = baseline_ + alphas * (1.0 - baseline_)  # (n_steps+1 , E)
         edge_masks.requires_grad_(True)
 
         x_batch    = x.repeat(self.n_steps + 1, 1)                 # (n_steps+1 , N_in)
