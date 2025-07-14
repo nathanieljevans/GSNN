@@ -4,8 +4,7 @@ Batched sparse matrix multiplication that scales with GPU's better.
 
 import torch
 import torch_geometric as pyg 
-import numpy as np
-import time
+
 
 class Conv(pyg.nn.MessagePassing):
     def __init__(self):
@@ -48,8 +47,53 @@ def batch_graphs(N, M, edge_index, B, device):
 
     return batched_edge_indices
 
+def xavier_uniform(size, fan_in, fan_out, gain=1, dtype=torch.float32): 
+    a = gain * torch.sqrt((6/(fan_in + fan_out)))
+    out = torch.empty(*size, dtype=dtype)
+    out = torch.nn.init.uniform_(out, a=-1, b=1) 
+    out = out * a 
+    return out 
+
+def xavier_normal(size, fan_in, fan_out, gain=1, dtype=torch.float32): 
+    a = gain * torch.sqrt((2/(fan_in + fan_out)))
+    out = torch.empty(*size, dtype=dtype)
+    out = torch.nn.init.normal_(out, mean=0, std=1) 
+    out = out * a 
+    return out 
+
+def uniform(size, gain=1., dtype=torch.float32): 
+    a = gain 
+    out = torch.empty(*size, dtype=dtype)
+    out = torch.nn.init.uniform_(out, a=-1, b=1) 
+    out = out * a 
+    return out 
+
+def normal(size, gain=1, dtype=torch.float32): 
+    a = gain
+    out = torch.empty(*size, dtype=dtype)
+    out = torch.nn.init.normal_(out, mean=0, std=1) 
+    out = out * a 
+    return out 
+
+def kaiming_uniform(size, fan_in, fan_out, fan_mode='fan_in', gain=1, dtype=torch.float32): 
+    fan_val = fan_in if fan_mode == 'fan_in' else fan_out
+    a = gain * torch.sqrt( 3 / fan_val )
+    out = torch.empty(*size, dtype=dtype)
+    out = torch.nn.init.uniform_(out, a=-1, b=1) 
+    out = out * a 
+    return out  
+
+def kaiming_normal(size, fan_in, fan_out, fan_mode='fan_in', gain=1, dtype=torch.float32): 
+    fan_val = fan_in if fan_mode == 'fan_in' else fan_out
+    a = gain / torch.sqrt( fan_val )
+    out = torch.empty(*size, dtype=dtype)
+    out = torch.nn.init.normal_(out, mean=0, std=1) 
+    out = out * a 
+    return out  
+
+
 class SparseLinear(torch.nn.Module): 
-    def __init__(self, indices, size, dtype=torch.float32, bias=True, init='kaiming'):
+    def __init__(self, indices, size, dtype=torch.float32, bias=True, init='kaiming', init_gain=1.):
         '''
         Sparse Linear layer, equivalent to sparse matrix multiplication as provided by indices. 
 
@@ -74,23 +118,22 @@ class SparseLinear(torch.nn.Module):
         fan_out = pyg.utils.degree(src, num_nodes=self.N)
         n_in = fan_in[dst]      # number of input channels 
         n_out = fan_out[src]    # number of output channels 
-        if init in ['xavier', 'glorot']:
-            std = (2/(n_in + n_out))**0.5 
-        elif init in ['kaiming', 'he']:
-            std = (2/n_in)**(0.5)
-        elif init == 'lecun': 
-            std = (1/n_in)**(0.5)
+
+        if init in ['xavier_uniform', 'glorot_uniform']:
+            values = xavier_uniform(indices.size(1), n_in, n_out, gain=init_gain, dtype=dtype)
+        if init in ['xavier_normal', 'glorot_normal']:
+            values = xavier_normal(indices.size(1), n_in, n_out, gain=init_gain, dtype=dtype)
+        elif init in ['kaiming_uniform', 'he_uniform']:
+            values = kaiming_uniform(indices.size(1), n_in, n_out, gain=init_gain, dtype=dtype)
+        elif init in ['kaiming_normal', 'he_normal']: 
+            values = kaiming_normal(indices.size(1), n_in, n_out, gain=init_gain, dtype=dtype)
+        elif init == 'uniform': 
+            values = uniform(indices.size(1), gain=init_gain, dtype=dtype)
         elif init == 'normal': 
-            std = 1
+            values = normal(indices.size(1), gain=init_gain, dtype=dtype)
         else:
-            raise ValueError('unrecognized weight initialization method, options: xavier, kaiming, lecun, normal')
+            raise ValueError('unrecognized weight initialization method, options: ')
         
-        self.init_var = std**2
-
-        # scale normal distribution
-        values = torch.randn(indices.size(1), dtype=dtype) # normal distribution 
-        values *= std # N(mean, std)
-
         self.values = torch.nn.Parameter(values) # torch optimizer require dense parameters 
         self.register_buffer('indices', indices.type(torch.long))
         
