@@ -74,8 +74,9 @@ class REINFORCE(torch.nn.Module):
     def update(self, rewards, actions=None):
         
         self.rewards.append(rewards)
-        
-        if self.actions is not None: self.actions.append(actions.detach().cpu().numpy())
+        # Keep a history of sampled actions for post-hoc analyses.
+        if actions is not None:
+            self.actions.append(actions.detach().cpu().numpy())
 
         self.entropy = float(max(self.entropy * self.entropy_decay, self.min_entropy))
         if self.verbose: print(f'entropy value -> {self.entropy:.3f}', end='\r')
@@ -110,9 +111,9 @@ class REINFORCE(torch.nn.Module):
             auroc = roc_auc_score(true_action, edge_probs)
             acc = ((edge_probs > 0.5) == true_action).mean()
             prob_true = self.prob_of(torch.from_numpy(true_action))
-            print(f'\t --> iter: {self.iteration} || auroc {auroc:0.3f} || acc: {acc:.3f} || prob(true_action): {prob_true:.3f} || last reward: {self.rewards[-1].mean():.3f}')
+            print(f'\t --> iter: {self.iteration} || auroc {auroc:0.3f} || acc: {acc:.3f} || prob(true_action): {prob_true:.3E} || last reward: {self.rewards[-1]:.3f}')
         else: 
-            print(f'\t --> iter: {self.iteration} || last reward: {self.rewards[-1].mean():.3f}')
+            print(f'\t --> iter: {self.iteration} || last reward: {self.rewards[-1]:.3f}')
 
     def step(self):
         
@@ -131,7 +132,7 @@ class REINFORCE(torch.nn.Module):
         self.update(rewards, action)
 
         # log best reward 
-        if (self.best_reward is None) or (rewards.mean() > self.best_reward.mean()): 
+        if (self.best_reward is None) or (rewards > self.best_reward): 
             self.best_reward = rewards
             self.best_action = action
 

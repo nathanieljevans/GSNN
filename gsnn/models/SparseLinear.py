@@ -49,28 +49,28 @@ def batch_graphs(N, M, edge_index, B, device):
 
 def xavier_uniform(size, fan_in, fan_out, gain=1, dtype=torch.float32): 
     a = gain * torch.sqrt((6/(fan_in + fan_out)))
-    out = torch.empty(*size, dtype=dtype)
+    out = torch.empty(size, dtype=dtype)
     out = torch.nn.init.uniform_(out, a=-1, b=1) 
     out = out * a 
     return out 
 
 def xavier_normal(size, fan_in, fan_out, gain=1, dtype=torch.float32): 
     a = gain * torch.sqrt((2/(fan_in + fan_out)))
-    out = torch.empty(*size, dtype=dtype)
+    out = torch.empty(size, dtype=dtype)
     out = torch.nn.init.normal_(out, mean=0, std=1) 
     out = out * a 
     return out 
 
 def uniform(size, gain=1., dtype=torch.float32): 
     a = gain 
-    out = torch.empty(*size, dtype=dtype)
+    out = torch.empty(size, dtype=dtype)
     out = torch.nn.init.uniform_(out, a=-1, b=1) 
     out = out * a 
     return out 
 
 def normal(size, gain=1, dtype=torch.float32): 
     a = gain
-    out = torch.empty(*size, dtype=dtype)
+    out = torch.empty(size, dtype=dtype)
     out = torch.nn.init.normal_(out, mean=0, std=1) 
     out = out * a 
     return out 
@@ -78,7 +78,7 @@ def normal(size, gain=1, dtype=torch.float32):
 def kaiming_uniform(size, fan_in, fan_out, fan_mode='fan_in', gain=1, dtype=torch.float32): 
     fan_val = fan_in if fan_mode == 'fan_in' else fan_out
     a = gain * torch.sqrt( 3 / fan_val )
-    out = torch.empty(*size, dtype=dtype)
+    out = torch.empty(size, dtype=dtype)
     out = torch.nn.init.uniform_(out, a=-1, b=1) 
     out = out * a 
     return out  
@@ -86,7 +86,7 @@ def kaiming_uniform(size, fan_in, fan_out, fan_mode='fan_in', gain=1, dtype=torc
 def kaiming_normal(size, fan_in, fan_out, fan_mode='fan_in', gain=1, dtype=torch.float32): 
     fan_val = fan_in if fan_mode == 'fan_in' else fan_out
     a = gain / torch.sqrt( fan_val )
-    out = torch.empty(*size, dtype=dtype)
+    out = torch.empty(size, dtype=dtype)
     out = torch.nn.init.normal_(out, mean=0, std=1) 
     out = out * a 
     return out  
@@ -119,13 +119,13 @@ class SparseLinear(torch.nn.Module):
         n_in = fan_in[dst]      # number of input channels 
         n_out = fan_out[src]    # number of output channels 
 
-        if init in ['xavier_uniform', 'glorot_uniform']:
+        if init == 'xavier_uniform': 
             values = xavier_uniform(indices.size(1), n_in, n_out, gain=init_gain, dtype=dtype)
-        if init in ['xavier_normal', 'glorot_normal']:
+        elif init == 'xavier_normal': 
             values = xavier_normal(indices.size(1), n_in, n_out, gain=init_gain, dtype=dtype)
-        elif init in ['kaiming_uniform', 'he_uniform']:
+        elif init == 'kaiming_uniform':
             values = kaiming_uniform(indices.size(1), n_in, n_out, gain=init_gain, dtype=dtype)
-        elif init in ['kaiming_normal', 'he_normal']: 
+        elif init == 'kaiming_normal': 
             values = kaiming_normal(indices.size(1), n_in, n_out, gain=init_gain, dtype=dtype)
         elif init == 'uniform': 
             values = uniform(indices.size(1), gain=init_gain, dtype=dtype)

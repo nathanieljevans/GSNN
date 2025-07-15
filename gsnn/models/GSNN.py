@@ -315,6 +315,7 @@ def apply_norm_and_nonlin(norm, nonlin, out, norm_first):
     else: 
         out = nonlin(out)  
         out = norm(out)
+
     return out
 
 
@@ -421,6 +422,7 @@ class ResBlock(torch.nn.Module):
         self.norm = _norm()
         self.nonlin = nonlin()
         self.mask = None 
+        self._store_activations = False 
 
     def set_node_mask(self, mask): 
         """
@@ -489,6 +491,8 @@ class ResBlock(torch.nn.Module):
         ############################
         
         out = apply_norm_and_nonlin(self.norm, self.nonlin, out, self.norm_first)
+
+        if self._store_activations: self._last_activation = out.detach().cpu()
 
         if self.node_mask is not None: 
             out = out.squeeze(-1) * self.node_mask.squeeze(-1)
@@ -874,3 +878,36 @@ class GSNN(torch.nn.Module):
         else: 
             out = edge2node(x, self.edge_index, self.output_node_mask)[:, self.output_node_mask]
             return out
+
+
+    def get_node_activations(self, x, agg='sum'): 
+        for mod in self.ResBlocks: mod._store_activations = True
+        preds = self.forward(x)
+
+        activations = []
+        for mod in self.ResBlocks:  
+            activations.append(mod._last_activation.detach().squeeze(-1)) 
+            del mod._last_activation
+
+        activations = torch.stack(activations, dim=0) 
+
+        if agg == 'sum': 
+            activations = activations.sum(dim=0).detach().cpu().numpy() 
+        elif agg == 'mean': 
+            activations = activations.mean(dim=0).detach().cpu().numpy()
+        elif agg == 'max': 
+            activations = activations.max(dim=0).values.detach().cpu().numpy()
+        else: 
+            raise ValueError(f'Invalid aggregation method: {agg}')
+
+        for mod in self.ResBlocks: mod._store_activations = False 
+
+        node_activation_dict = {}
+        for i in range(self.ResBlocks[0].channel_groups.max()): 
+            ixs = (self.ResBlocks[0].channel_groups == i).detach().cpu().numpy() 
+            node_acts = activations[:, ixs] 
+            node_name = self.homo_names[i] 
+            node_activation_dict[node_name] = node_acts 
+
+        return node_activation_dict
+

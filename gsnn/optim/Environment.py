@@ -54,7 +54,12 @@ class Environment():
         configurations. It is used in conjunction with the REINFORCE algorithm to optimize graph structure.
 
         Args:
-            action_edge_dict (dict): Dictionary mapping edge types to action indices
+            action_edge_dict (dict): Dictionary that maps each edge type (key) to **a 1-D tensor/list with one entry per edge**.
+                The entries need **not** be unique across different keys – a fresh, global index is
+                allocated internally so that each edge receives its own independent Bernoulli
+                action.  Use the special value ``-1`` for edges that should always be kept (these
+                share a single, constant action that is fixed to 1). The total number of learnable
+                actions is inferred automatically.
             train_dataset (Dataset): Training dataset
             val_dataset (Dataset): Validation dataset
             model_kwargs (dict): Model configuration parameters
@@ -89,22 +94,72 @@ class Environment():
         self.N_func = len(model_kwargs['node_names_dict']['function'])
         self.E_func = self.edge_index_dict['function', 'to','function'].size(1) 
 
+        # ------------------------------------------------------------------
+        # Build a *unique* global index for every optimisable edge.
+        # Each key in ``action_edge_dict`` can list indices for its edges. These
+        # indices no longer need to be unique across keys – we assign a fresh
+        # global index sequentially so that every edge has its own independent
+        # Bernoulli action.  Indices with value ``-1`` are interpreted as
+        # *fixed* (always-on) edges and share a single global index that is
+        # forced to 1 during optimisation.
+        # ------------------------------------------------------------------
+        self.key_action_index = {}
+        _offset = 0
+        for _key, _idxs in self.action_edge_dict.items():
+            # Make sure we can iterate regardless of the container type
+            _idxs_iter = _idxs.tolist() if torch.is_tensor(_idxs) else list(_idxs)
+            _map = []
+            for _i in _idxs_iter:
+                if _i == -1:
+                    # placeholder, will be replaced by fixed index later
+                    _map.append(-1)
+                else:
+                    _map.append(_offset)
+                    _offset += 1
+            self.key_action_index[_key] = torch.tensor(_map, dtype=torch.long)
+
+        # Index of the constant "always-on" edge that backs all -1 entries
+        self.fixed_action_index = _offset
+        # Replace the -1 placeholders by the fixed index
+        for _key in self.key_action_index:
+            mask_fixed = self.key_action_index[_key] == -1
+            self.key_action_index[_key][mask_fixed] = self.fixed_action_index
+
+        # Number of learnable actions (excludes the always-on sentinel)
+        self.n_actions = _offset
+
     def augment_edge_index(self, action): 
+        """Augment ``edge_index_dict`` according to the sampled *action*.
 
-        # add a default fixed edge to the action space
-        # all action indexes with value -1 will be set to True in the edge mask 
-        action = torch.cat((action.squeeze(), torch.tensor([1], dtype=torch.long, device=action.device)), dim=-1)
+        Parameters
+        ----------
+        action : torch.Tensor, shape (n_actions,)
+            Binary vector sampled from the policy that decides which edges to
+            keep (1) or drop (0).
+        """
 
-        action = action == 1         
-        #The action_edge_dict  {key: int (E,)} where the values correspond to the index in `action`
-        # therefore a single action can be used to mask multiple edges 
-        edge_mask_dict = {key: action[values] for key, values in self.action_edge_dict.items()}
+        # Append the constant *always-on* action that backs all fixed edges.
+        action = action.squeeze()
+        if action.dim() == 0:
+            action = action.unsqueeze(0)
+        action = torch.cat(
+            (action, torch.tensor([1.0], dtype=action.dtype, device=action.device)),
+            dim=0,
+        )
 
-        edge_index_dict_ = {} 
+        action_bool = action == 1  # convert to boolean mask once
+
+        # Map the global action vector to every edge type
+        edge_mask_dict = {
+            key: action_bool[idxs]
+            for key, idxs in self.key_action_index.items()
+        }
+
+        edge_index_dict_ = {}
         for key, edge_index in self.edge_index_dict.items():
-            if key in edge_mask_dict: 
+            if key in edge_mask_dict:
                 edge_index_dict_[key] = edge_index[:, edge_mask_dict[key]]
-            else: 
+            else:
                 edge_index_dict_[key] = edge_index
 
         return edge_index_dict_
@@ -137,6 +192,9 @@ class Environment():
                 yhat = model(x)
                 loss = crit(yhat, y)
                 loss.backward()
+                if 'clip_grad' in self.training_kwargs: 
+                    if self.training_kwargs['clip_grad']: 
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
                 optim.step()
 
                 if torch.isnan(loss): 
@@ -199,14 +257,14 @@ class Environment():
         # augment edge_index_dict appropriately 
         edge_index_dict = self.augment_edge_index(action=action.cpu())
 
-        if not self.validate(edge_index_dict): return 0
+        if not self.validate(edge_index_dict): return -1
 
         # train model 
         try: 
             reward = self.train(edge_index_dict)
         except: 
             # failed trials will result in low reward; e.g., nan divergences
-            reward = [-1]
+            reward = -1
             if self.raise_error_on_fail: raise
 
         return reward
