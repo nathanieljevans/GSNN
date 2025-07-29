@@ -1,5 +1,5 @@
 import copy
-from typing import Union, List, Optional
+from typing import Union, List, Optional, Callable
 
 import numpy as np
 import pandas as pd
@@ -42,7 +42,10 @@ class CounterfactualExplainer:
     Example
     -------
     >>> explainer = CounterfactualExplainer(model, data)
+    >>> # Single observation
     >>> df = explainer.explain(x, target_value=0.8, target_idx=0, max_iter=500)
+    >>> # Multiple observations (same perturbation applied to all)
+    >>> df = explainer.explain(x_batch, target_value=0.8, target_idx=0, max_iter=500)
     >>> df.sort_values('perturbation', key=abs, ascending=False).head()
     feature    original  perturbation  counterfactual
     in0        0.12      0.45          0.57
@@ -76,20 +79,24 @@ class CounterfactualExplainer:
         lr: float = 0.01,
         weight_decay: float = 0.01,
         dropout: float = 0.0,
+        min_iter: int = 25,
         max_iter: int = 1000,
         tolerance: float = 1e-5,
         verbose: bool = True,
+        transform: Optional[Callable] = torch.nn.Identity(),
     ) -> pd.DataFrame:
         """Learn minimal perturbation to achieve target model output.
 
         Parameters
         ----------
-        x : torch.Tensor  (shape: [N_in] or [1, N_in])
+        x : torch.Tensor  (shape: [N_in] or [B, N_in])
             Input feature tensor. If 1D, it will be unsqueezed to batch size 1.
+            For multiple observations, the same perturbation will be applied to all.
         target_value : float or torch.Tensor
             Desired model output. If target_idx is specified, this should be a
             scalar or tensor matching the number of target indices. If target_idx
-            is None, this should match the full output dimension.
+            is None, this should match the full output dimension. The same target
+            value is used for all observations in the batch.
         target_idx : int, list[int], or None
             Output dimension(s) to target. If None, targets all outputs.
         trainable_mask : torch.Tensor, optional (shape: [N_in])
@@ -101,12 +108,16 @@ class CounterfactualExplainer:
             L2 regularization coefficient for minimizing perturbation magnitude.
         dropout : float, optional (default=0.0)
             Dropout rate for the model.
+        min_iter : int, optional (default=25)
+            Minimum number of optimization iterations.
         max_iter : int, optional (default=1000)
             Maximum number of optimization iterations.
         tolerance : float, optional (default=1e-6)
             Convergence tolerance for loss change between iterations.
         verbose : bool, optional (default=False)
             Print optimization progress.
+        transform : Callable, optional
+            Transform the perturbation, must be differentiable. E.g., relu(), tanh()
 
         Returns
         -------
@@ -123,20 +134,17 @@ class CounterfactualExplainer:
             x = x.unsqueeze(0)  # Add batch dimension
         
         batch_size, n_features = x.shape
-        if batch_size != 1:
-            raise ValueError("CounterfactualExplainer only supports single examples")
         
-        # Convert target_value to tensor
-        if not isinstance(target_value, torch.Tensor):
-            target_value = torch.tensor(target_value, device=self.device, dtype=x.dtype)
-        else:
-            target_value = target_value.to(self.device)
+
         
         # Handle target_idx
+        target_idx_tensor = None
         if target_idx is not None:
             if isinstance(target_idx, int):
-                target_idx = [target_idx]
-            target_idx = torch.tensor(target_idx, device=self.device)
+                target_idx_list = [target_idx]
+            else:
+                target_idx_list = target_idx
+            target_idx_tensor = torch.tensor(target_idx_list, device=self.device)
         
         # Setup trainable mask
         if trainable_mask is not None:
@@ -149,14 +157,35 @@ class CounterfactualExplainer:
         # ------------------------------------------------------------------
         # 2. Initialize perturbation and optimizer
         # ------------------------------------------------------------------
-        x_attack = torch.zeros_like(x, requires_grad=True)
+        # Use a single perturbation vector that will be broadcast across all batch examples
+        x_attack = torch.zeros(1, n_features, device=self.device, requires_grad=True)
         optimizer = torch.optim.Adam([x_attack], lr=lr, weight_decay=weight_decay)
+        
+        # Ensure target_value is properly shaped for batch operations
+        if not isinstance(target_value, torch.Tensor):
+            target_value = torch.tensor(target_value, device=self.device, dtype=x.dtype)
+        else:
+            target_value = target_value.to(self.device)
+        
+        # Expand target_value to match batch size if needed
+        if target_idx_tensor is not None:
+            target_shape = (batch_size, len(target_idx_tensor))
+        else:
+            # Get output size from a test forward pass
+            with torch.no_grad():
+                test_output = self.model(x[:1])  # Use first sample to get output shape
+                target_shape = (batch_size, test_output.shape[1])
+        
+        if target_value.dim() == 0:  # scalar
+            target_value = target_value.expand(target_shape)
+        elif target_value.dim() == 1 and target_value.shape[0] == target_shape[1]:
+            target_value = target_value.unsqueeze(0).expand(target_shape)
         
         # Store original prediction for reference
         with torch.no_grad():
             original_pred = self.model(x)
-            if target_idx is not None:
-                original_pred = original_pred[:, target_idx]
+            if target_idx_tensor is not None:
+                original_pred = original_pred[:, target_idx_tensor]
 
         # ------------------------------------------------------------------
         # 3. Gradient descent optimization
@@ -167,15 +196,15 @@ class CounterfactualExplainer:
             optimizer.zero_grad()
             
             # Forward pass with perturbation
-            x_perturbed = x + torch.nn.functional.dropout(x_attack, p=dropout)
+            x_perturbed = x + F.dropout(transform(x_attack), p=dropout)
             pred = self.model(x_perturbed)
             
             # Select target dimensions if specified
-            if target_idx is not None:
-                pred = pred[:, target_idx]
+            if target_idx_tensor is not None:
+                pred = pred[:, target_idx_tensor]
             
             # Compute loss (MSE between prediction and target)
-            loss = F.mse_loss(pred, target_value.view_as(pred))
+            loss = F.mse_loss(pred, target_value)
             
             # Backward pass
             loss.backward()
@@ -195,9 +224,10 @@ class CounterfactualExplainer:
             loss_val = loss.item()
             if verbose: print(f"Iteration {iteration}: Loss = {loss_val:.6f}", end='\r')
             
-            if abs(prev_loss - loss_val) < tolerance:
+            if (abs(prev_loss - loss_val) < tolerance) and (iteration > min_iter):
                 if verbose:
                     print(f"\nConverged at iteration {iteration}")
+                    print(f"Final loss: {loss_val:.6f}")
                 break
             
             prev_loss = loss_val
@@ -207,19 +237,24 @@ class CounterfactualExplainer:
         # 4. Package results as DataFrame
         # ------------------------------------------------------------------
         with torch.no_grad():
-            x_final = x + x_attack
+            x_final = x + transform(x_attack)
             final_pred = self.model(x_final)
-            if target_idx is not None:
-                final_pred = final_pred[:, target_idx]
+            if target_idx_tensor is not None:
+                final_pred = final_pred[:, target_idx_tensor]
         
-        # Extract numpy arrays
-        x_np = x.squeeze(0).detach().cpu().numpy()
-        x_attack_np = x_attack.squeeze(0).detach().cpu().numpy()
-        x_final_np = x_final.squeeze(0).detach().cpu().numpy()
+        # Extract numpy arrays - for multiple observations, we show the average original and counterfactual
+        if batch_size == 1:
+            x_np = x.squeeze(0).detach().cpu().numpy()
+            x_final_np = x_final.squeeze(0).detach().cpu().numpy()
+        else:
+            x_np = x.mean(dim=0).detach().cpu().numpy()  # Average across batch
+            x_final_np = x_final.mean(dim=0).detach().cpu().numpy()  # Average across batch
+        
+        x_attack_np = transform(x_attack).squeeze(0).detach().cpu().numpy()  # Same perturbation for all
         
         # Create feature names
-        if self.data is not None and hasattr(self.data, 'feature_names'):
-            feature_names = self.data.feature_names
+        if self.data is not None and hasattr(self.data, 'node_names_dict'):
+            feature_names = self.data.node_names_dict['input']
         else:
             feature_names = [f"feature_{i}" for i in range(n_features)]
         
@@ -234,6 +269,7 @@ class CounterfactualExplainer:
         # Add metadata as attributes
         df.attrs['converged_loss'] = loss_val
         df.attrs['iterations'] = iteration + 1
+        df.attrs['batch_size'] = batch_size
         df.attrs['original_prediction'] = original_pred.detach().cpu().numpy()
         df.attrs['final_prediction'] = final_pred.detach().cpu().numpy()
         df.attrs['target_value'] = target_value.detach().cpu().numpy()

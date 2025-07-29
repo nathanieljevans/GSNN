@@ -46,7 +46,7 @@ class Environment():
 
     def __init__(self, action_edge_dict, train_dataset, val_dataset, model_kwargs, 
                  training_kwargs, metric='spearman', reward_type='auc', verbose=True,
-                 raise_error_on_fail=False): 
+                 raise_error_on_fail=False, model=GSNN): 
         """
         Environment for training and evaluating graph neural networks with different edge configurations.
 
@@ -68,6 +68,7 @@ class Environment():
             reward_type (str, optional): Type of reward signal. One of ['auc', 'best', 'last']. Default: 'auc'
             verbose (bool, optional): Whether to print training progress. Default: True
             raise_error_on_fail (bool, optional): Whether to raise errors on training failures. Default: False
+            model (class, optional): Model class to use. Default: gsnn.models.GSNN
 
         Example:
             >>> action_edge_dict = {('input', 'to', 'function'): torch.arange(n_edges)}
@@ -87,6 +88,7 @@ class Environment():
         self.reward_type = reward_type
         self.verbose = verbose
         self.raise_error_on_fail = raise_error_on_fail
+        self._model = model 
 
         self.edge_index_dict = model_kwargs['edge_index_dict']
         self.model_kwargs.pop('edge_index_dict', None)
@@ -175,7 +177,7 @@ class Environment():
         train_loader = DataLoader(self.train_dataset, batch_size=self.training_kwargs['batch'], num_workers=self.training_kwargs['workers'], shuffle=True, persistent_workers=True)
         val_loader = DataLoader(self.val_dataset, batch_size=self.training_kwargs['batch'], num_workers=self.training_kwargs['workers'], shuffle=False, persistent_workers=True)
         
-        model = GSNN(edge_index_dict=edge_index_dict, **self.model_kwargs).to(device)
+        model = self._model(edge_index_dict=edge_index_dict, **self.model_kwargs).to(device)
 
         optim = torch.optim.Adam(model.parameters(), lr=self.training_kwargs['lr'])
         crit = torch.nn.MSELoss() 

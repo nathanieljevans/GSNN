@@ -93,7 +93,7 @@ def kaiming_normal(size, fan_in, fan_out, fan_mode='fan_in', gain=1, dtype=torch
 
 
 class SparseLinear(torch.nn.Module): 
-    def __init__(self, indices, size, dtype=torch.float32, bias=True, init='kaiming', init_gain=1.):
+    def __init__(self, indices, size, dtype=torch.float32, bias=True, init='kaiming', init_gain=1., degree_norm_eps=1e-8):
         '''
         Sparse Linear layer, equivalent to sparse matrix multiplication as provided by indices. 
 
@@ -103,6 +103,8 @@ class SparseLinear(torch.nn.Module):
             dtype           weight matrix type 
             bias            whether to include a bias term; Wx + B
             init            weight initialization strategy 
+            init_gain       gain factor for initialization
+            degree_norm_eps small epsilon to prevent division by zero in degree normalization
         '''
         super().__init__() 
 
@@ -131,8 +133,17 @@ class SparseLinear(torch.nn.Module):
             values = uniform(indices.size(1), gain=init_gain, dtype=dtype)
         elif init == 'normal': 
             values = normal(indices.size(1), gain=init_gain, dtype=dtype)
+        elif init == 'degree_normalized':
+            # Initialize with uniform distribution, then apply degree-based normalization
+            # This implements D^(-0.5)AD^(-0.5) style normalization from GCNs
+            values = uniform(indices.size(1), gain=init_gain, dtype=dtype)
+            # Compute degree normalization factor: 1/sqrt(deg_i * deg_j) for edge (i,j)
+            degree_norm = 1.0 / torch.sqrt((n_in + degree_norm_eps) * (n_out + degree_norm_eps))
+            values = values * degree_norm
+        elif init == 'zeros': 
+            values = torch.zeros((indices.size(1), 1), dtype=dtype)
         else:
-            raise ValueError('unrecognized weight initialization method, options: ')
+            raise ValueError('unrecognized weight initialization method, options: xavier_uniform, xavier_normal, kaiming_uniform, kaiming_normal, uniform, normal, degree_normalized, zeros')
         
         self.values = torch.nn.Parameter(values) # torch optimizer require dense parameters 
         self.register_buffer('indices', indices.type(torch.long))

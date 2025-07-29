@@ -54,44 +54,50 @@ class GroupBatchNorm(nn.Module):
             x = x.squeeze(-1)  # now (B, C)
         
         B, C = x.shape
-        
-        # We'll flatten out the batch to compute group stats across all (batch, group) items
-        # group index for each of the B*C entries:
-        #   e.g. if channel_groups = [0,0,1,1], repeated B times => shape(B*C,)
-        group_idx = self.channel_groups.unsqueeze(0).expand(B, -1).reshape(-1)
-        
-        x_flat = x.reshape(-1)  # shape (B*C,)
 
         if self.training or (not self.track_running_stats):
-            # ----- Compute batch mean & var for each group -----
-            mean = pyg.utils.scatter(x_flat, group_idx, dim=0, reduce='mean')  # (num_groups,)
+            # ----- Compute batch mean & var for each group efficiently -----
+            # Use scatter on channel dimension to avoid flattening
+            group_means = pyg.utils.scatter(x, self.channel_groups, dim=1, reduce='mean')  # (B, num_groups)
             
-            # Use "mean[cg]" to broadcast for each item in x_flat, then recompute var
-            var = pyg.utils.scatter((x_flat - mean[group_idx])**2, group_idx, dim=0, reduce='mean')  # (num_groups,)
+            # Compute group means across batch dimension
+            batch_group_means = group_means.mean(dim=0)  # (num_groups,)
+            
+            # For variance, we need to compute (x - group_mean)^2 for each group
+            # Broadcast group means back to original shape efficiently
+            expanded_means = batch_group_means.index_select(0, self.channel_groups).unsqueeze(0)  # (1, C)
+            
+            # Compute variance using the broadcast mean
+            centered = x - expanded_means  # (B, C)
+            group_vars_per_batch = pyg.utils.scatter(centered**2, self.channel_groups, dim=1, reduce='mean')  # (B, num_groups)
+            batch_group_vars = group_vars_per_batch.mean(dim=0)  # (num_groups,)
 
             # If we're tracking running stats, update them
             if self.track_running_stats:
                 with torch.no_grad():
                     self.num_batches_tracked += 1
-                momentum = self.momentum
-                
-                self.running_mean = (1 - momentum)*self.running_mean + momentum*mean
-                self.running_var  = (1 - momentum)*self.running_var  + momentum*var
+                    momentum = self.momentum
+                    
+                    self.running_mean = (1 - momentum)*self.running_mean + momentum*batch_group_means
+                    self.running_var  = (1 - momentum)*self.running_var  + momentum*batch_group_vars
 
         else:
             # ----- Use running stats (inference mode) -----
-            mean = self.running_mean
-            var  = self.running_var
+            batch_group_means = self.running_mean
+            batch_group_vars  = self.running_var
+        
+        # ----- Apply normalization efficiently -----
+        # Broadcast means and vars back to (B, C) shape
+        expanded_means = batch_group_means.index_select(0, self.channel_groups).unsqueeze(0)  # (1, C)
+        expanded_vars = batch_group_vars.index_select(0, self.channel_groups).unsqueeze(0)    # (1, C)
         
         # Normalize
-        # We must broadcast mean/var back to (B*C,)
-        normed = x_flat - mean[group_idx]
-        normed = normed / torch.sqrt(var[group_idx] + self.eps)
+        x_normalized = (x - expanded_means) / torch.sqrt(expanded_vars + self.eps)
 
         # Apply learnable affine transform if provided
         if self.gamma is not None and self.beta is not None:
-            normed = normed * self.gamma[group_idx] + self.beta[group_idx]
+            gamma_expanded = self.gamma.index_select(0, self.channel_groups).unsqueeze(0)  # (1, C)
+            beta_expanded = self.beta.index_select(0, self.channel_groups).unsqueeze(0)    # (1, C)
+            x_normalized = x_normalized * gamma_expanded + beta_expanded
         
-        # Reshape back to (B, C)
-        x_out = normed.view(B, C)
-        return x_out.unsqueeze(-1)  # to match the original shape (B, C, 1) if needed
+        return x_normalized.unsqueeze(-1)  # to match the original shape (B, C, 1) if needed

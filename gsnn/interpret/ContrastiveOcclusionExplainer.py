@@ -39,6 +39,8 @@ class ContrastiveOcclusionExplainer:
         Number of edge occlusions to process in parallel.
     ignore_cuda : bool, optional (default=False)
         Force the explainer to run on CPU even if CUDA is available.
+    verbose : bool, optional (default=False)
+        Print progress information during explanation computation.
 
     Example
     -------
@@ -57,9 +59,11 @@ class ContrastiveOcclusionExplainer:
         data,
         batch_size: int = 32,
         ignore_cuda: bool = False,
+        verbose: bool = False,
     ) -> None:
         self.data = data
         self.batch_size = batch_size
+        self.verbose = verbose
         self.device = (
             "cuda" if (torch.cuda.is_available() and not ignore_cuda) else "cpu"
         )
@@ -72,6 +76,12 @@ class ContrastiveOcclusionExplainer:
 
         # Store number of edges
         self.E = model.edge_index.size(1)
+        
+        if self.verbose:
+            print(f"ContrastiveOcclusionExplainer initialized:")
+            print(f"  Device: {self.device}")
+            print(f"  Batch size: {self.batch_size}")
+            print(f"  Total edges: {self.E}")
 
 
     def explain(
@@ -103,21 +113,39 @@ class ContrastiveOcclusionExplainer:
         if isinstance(target_idx, int):
             target_idx = [target_idx]
 
+        if self.verbose:
+            print(f"\nStarting contrastive occlusion explanation:")
+            print(f"  Input shapes: x1={x1.shape}, x2={x2.shape}")
+            print(f"  Target indices: {target_idx}")
+            print(f"  Total batches to process: {((self.E - 1) // self.batch_size) + 1}")
+
         # ------------------------------------------------------------------
         # 1. Compute baseline difference (all edges present)
         # ------------------------------------------------------------------
+        if self.verbose:
+            print("Computing baseline prediction difference...")
+            
         baseline_mask = torch.ones((1, self.E), device=self.device)
         baseline_diff = self._compute_diff(x1, x2, target_idx, baseline_mask)
+        
+        if self.verbose:
+            print(f"  Baseline |Δf| = {baseline_diff:.6f}")
 
         # ------------------------------------------------------------------
         # 2. Compute occlusion scores in batches
         # ------------------------------------------------------------------
+        if self.verbose:
+            print("Computing edge occlusion scores...")
+            
         occlusion_scores = torch.zeros(self.E, device=self.device)
         
         for start_idx in range(0, self.E, self.batch_size):
             end_idx = min(start_idx + self.batch_size, self.E)
             batch_size_actual = end_idx - start_idx
             
+            if self.verbose:
+                print(f"Processing batch {start_idx // self.batch_size + 1}/{((self.E - 1) // self.batch_size) + 1}", end='\r')
+
             # Create batch of masks with one edge removed per mask
             batch_masks = torch.ones((batch_size_actual, self.E), device=self.device)
             for i, edge_idx in enumerate(range(start_idx, end_idx)):
@@ -138,6 +166,9 @@ class ContrastiveOcclusionExplainer:
             occluded_diffs = (preds_x1 - preds_x2).abs()
             batch_scores = baseline_diff - occluded_diffs
             occlusion_scores[start_idx:end_idx] = batch_scores
+
+        if self.verbose:
+            print("Edge occlusion explanation complete.")
 
         # ------------------------------------------------------------------
         # 3. Package results

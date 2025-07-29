@@ -13,7 +13,7 @@ class NN(torch.nn.Module):
             layers                  int                 number of hidden layers 
             dropout                 float               dropout regularization probability 
             nonlin                  pytorch.module      non-linear activation function 
-            out                     pytorch.module      output transformation to be applied 
+            out                     pytorch.module      output transformation to be applied (default: None)
             norm                    pytorch.module      normalization method to use 
         '''
         super().__init__()

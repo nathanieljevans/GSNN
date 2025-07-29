@@ -1,14 +1,17 @@
+from tkinter.constants import FALSE
 import torch
 import torch.nn as nn
 import torch.nn.functional 
 from torch.utils.checkpoint import checkpoint #_sequential
-from torch.autograd import Variable
 from gsnn.models.SparseLinear import batch_graphs
 import numpy as np
 from gsnn.models.SparseLinear import SparseLinear
 from gsnn.models.GroupLayerNorm import GroupLayerNorm
 from gsnn.models.SoftmaxGroupNorm import SoftmaxGroupNorm
 from gsnn.models.GroupBatchNorm import GroupBatchNorm
+from gsnn.models.GroupRMSNorm import GroupRMSNorm
+from gsnn.models.GroupEMANorm import GroupEMANorm
+from gsnn.models.ChannelEMANorm import ChannelEMANorm
 import warnings
 import pandas as pd
 
@@ -450,7 +453,8 @@ class NodeAttention(torch.nn.Module):
 class ResBlock(torch.nn.Module): 
 
     def __init__(self, bias, nonlin, indices_params, dropout=0., norm='layer', init='xavier', 
-                 lin_in=None, lin_out=None, residual=True, norm_first=True, node_attn=False): 
+                 lin_in=None, lin_out=None, residual=True, norm_first=True, node_attn=False, 
+                 learn_residual=True, affine=True): 
         r"""A residual block for GSNN that applies sparse linear transformations with optional normalization.
 
         Each ResBlock consists of:
@@ -473,7 +477,7 @@ class ResBlock(torch.nn.Module):
                 - channel_groups (list): Mapping of channels to their respective nodes
             dropout (float, optional): Dropout probability. (default: :obj:`0.`)
             norm (str, optional): Normalization type (:obj:`'layer'`, :obj:`'batch'`, :obj:`'softmax'`, 
-                :obj:`'groupbatch'`, :obj:`'edgebatch'` or :obj:`'none'`). (default: :obj:`'layer'`)
+                :obj:`'groupbatch'`, :obj:`'edgebatch'`, :obj:`'rms'`, :obj:`'ema'`, :obj:`'channelema'` or :obj:`'none'`). (default: :obj:`'layer'`)
             init (str, optional): Weight initialization strategy (:obj:`'xavier'` or :obj:`'kaiming'`).
                 (default: :obj:`'xavier'`)
             lin_in (SparseLinear, optional): Predefined input linear layer. If :obj:`None`, constructed 
@@ -482,7 +486,9 @@ class ResBlock(torch.nn.Module):
                 from indices_params. (default: :obj:`None`)
             residual (bool, optional): If set to :obj:`True`, adds residual connections. (default: :obj:`True`)
             norm_first (bool, optional): If set to :obj:`True`, apply normalization before nonlinearity. (default: :obj:`True`) 
-            
+            learn_residual (bool, optional): If set to :obj:`True`, learn the residual connection. (default: :obj:`True`)
+            affine (bool, optional): If set to :obj:`True`, the normalization layers will learn an additive bias and scale. (default: :obj:`True`)
+
         Example:
             >>> # Create indices for a simple graph with 2 edges and 1 function node with 3 channels
             >>> w_in_indices = torch.tensor([[0, 1], [0, 1]])  # 2 edges, 2 channels
@@ -517,19 +523,29 @@ class ResBlock(torch.nn.Module):
         if norm == 'layer': 
             _norm = lambda: GroupLayerNorm(channel_groups)
         elif norm == 'batch': 
-            _norm = lambda: torch.nn.BatchNorm1d(len(channel_groups), eps=1e-3, affine=False)
+            _norm = lambda: torch.nn.BatchNorm1d(len(channel_groups), eps=1e-3, affine=affine)
+        elif norm == 'batch++':
+            self._edge_norm = torch.nn.BatchNorm1d(w_in_size[0], eps=1e-3, affine=affine) 
+            _norm = lambda: torch.nn.BatchNorm1d(len(channel_groups), eps=1e-3, affine=affine)
         elif norm == 'groupbatch': 
-            _norm = lambda: GroupBatchNorm(channel_groups)
+            _norm = lambda: GroupBatchNorm(channel_groups, affine=affine)
         elif norm == 'edgebatch':
             _norm = lambda: torch.nn.Identity()
-            self._edge_norm = torch.nn.BatchNorm1d(w_in_size[0], eps=1e-2)
+            self._edge_norm = torch.nn.BatchNorm1d(w_in_size[0], eps=1e-3, affine=affine) 
         elif norm == 'softmax': 
             _norm = lambda: SoftmaxGroupNorm(channel_groups)
             if norm_first: warnings.warn('It is recommended to apply softmax normalization after the nonlinearity (set norm_first=False)')
+        elif norm == 'rms':
+            _norm = lambda: GroupRMSNorm(channel_groups, affine=affine)
+        elif norm == 'ema':
+            _norm = lambda: GroupEMANorm(channel_groups, affine=affine)
+        elif norm == 'channelema':
+            self._edge_norm = ChannelEMANorm(w_in_size[0], affine=affine)
+            _norm = lambda: ChannelEMANorm(len(channel_groups), affine=affine)
         elif norm == 'none': 
             _norm = lambda: torch.nn.Identity()
         else:
-            raise ValueError('unrecognized norm type')
+            raise ValueError(f'unrecognized norm type: {norm}. Available options: layer, batch, groupbatch, edgebatch, softmax, rms, ema, channelema, none')
 
         if lin_in is not None:
             self.lin_in = lin_in 
@@ -544,7 +560,13 @@ class ResBlock(torch.nn.Module):
         self.norm = _norm()
         self.nonlin = nonlin()
         self.mask = None 
-        self._store_activations = False 
+        self._store_activations = False  
+        self.learn_residual = learn_residual
+
+        if self.learn_residual: 
+            self.residual_weight = nn.Parameter(torch.tensor(1.0))
+        else: 
+            self.residual_weight = 1.0
 
     def set_node_mask(self, mask): 
         """
@@ -611,6 +633,9 @@ class ResBlock(torch.nn.Module):
         
         out = apply_norm_and_nonlin(self.norm, self.nonlin, out, self.norm_first)
 
+        # drops out node channels (not edge channels)
+        out = torch.nn.functional.dropout(out, p=self.dropout, training=self.training)
+
         if self.node_attn is not None:
             out = self.node_attn(out)
 
@@ -621,15 +646,12 @@ class ResBlock(torch.nn.Module):
 
         out = self.lin_out(out, batched_indices=batch_params[1]) 
 
-        # drops out edge features, not node hidden channels 
-        out = torch.nn.functional.dropout(out, p=self.dropout, training=self.training)
-
         if self.residual: 
-            out = out.squeeze(-1) + x 
+
+            out = out.squeeze(-1) + self.residual_weight.relu() * x 
         
         return out
     
-
 
 #########################################################################################################################
 #########################################################################################################################
@@ -638,7 +660,7 @@ class ResBlock(torch.nn.Module):
 class GSNN(torch.nn.Module): 
 
     def __init__(self, edge_index_dict, node_names_dict, channels, layers, dropout=0., nonlin=torch.nn.ELU, bias=True, 
-                 share_layers=True, add_function_self_edges=True, norm='layer', init='xavier_uniform', verbose=False, 
+                 share_layers=True, add_function_self_edges=True, norm='groupbatch', init='kaiming_normal', verbose=False, 
                  edge_channels=1, checkpoint=False, residual=True, norm_first=True, node_attn=False):
         r"""Graph Structured Neural Network (GSNN) that constrains neural network architecture using a predefined graph structure.
         Unlike traditional GNNs that learn from graph structure, GSNN uses the graph to constrain which variables can directly 
@@ -668,7 +690,7 @@ class GSNN(torch.nn.Module):
             add_function_self_edges (bool, optional): If set to :obj:`True`, add self-connections to function nodes.
                 (default: :obj:`True`)
             norm (str, optional): Normalization type (:obj:`'layer'`, :obj:`'batch'`, :obj:`'softmax'`, 
-                :obj:`'groupbatch'`, :obj:`'edgebatch'` or :obj:`'none'`). (default: :obj:`'layer'`)
+                :obj:`'groupbatch'`, :obj:`'edgebatch'`, :obj:`'rms'`, :obj:`'ema'`, :obj:`'channelema'` or :obj:`'none'`). (default: :obj:`'groupbatch'`)
             init (str, optional): Weight initialization strategy (:obj:`'xavier'` or :obj:`'kaiming'`).
                 (default: :obj:`'xavier'`)
             verbose (bool, optional): If set to :obj:`True`, print debugging information. (default: :obj:`False`)
@@ -724,6 +746,7 @@ class GSNN(torch.nn.Module):
         self.dropout                    = dropout
         self.residual                   = residual
         self.node_attn                  = node_attn
+        self.norm_first                  = norm_first
 
         if self.checkpoint: 
             # BUG:  checkpoint.py:1399: FutureWarning: `torch.cpu.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cpu', args...)` instead.
@@ -768,6 +791,7 @@ class GSNN(torch.nn.Module):
                                                        lin_in           = lin_in,
                                                        lin_out          = lin_out,
                                                        node_attn        = self.node_attn,
+                                                       norm_first       = self.norm_first,
                                                        residual         = self.residual) for i in range(self.layers)])
         
         self._B             = None
@@ -1074,3 +1098,67 @@ class GSNN(torch.nn.Module):
         df = df.set_index("node")
         return df
 
+    def pretrain(self, loader, lr=1e-3, epochs=10, verbose=False, device='cuda', early_stop_patience=None, validation_loader=None): 
+        """
+        Pretrain the GSNN by encouraging edge latent representations to follow a unit normal distribution.
+        
+        This pretraining strategy aims to regularize the latent space by minimizing the KL divergence
+        between the actual edge feature distribution and a unit normal distribution. This may help
+        mitigate weight initialization issues, improve gradient flow, and provide better starting
+        conditions for downstream training.
+        
+        Args:
+            loader (DataLoader): Training data loader providing (x, _) batches where x contains input features.
+            lr (float, optional): Learning rate for the Adam optimizer. Default: 1e-4.
+            epochs (int, optional): Number of pretraining epochs. Default: 100.
+            verbose (bool, optional): If True, print loss information during training. Default: False.
+            device (str, optional): Device to run pretraining on ('cuda' or 'cpu'). Default: 'cuda'.
+            early_stop_patience (int, optional): Stop training if loss doesn't improve for this many epochs.
+                If None, no early stopping is applied. Default: None.
+            validation_loader (DataLoader, optional): Validation data loader for early stopping.
+                Only used if early_stop_patience is specified. Default: None.
+        
+        Returns:
+            dict: Dictionary containing training history with keys:
+                - 'train_losses': List of training losses per epoch
+                - 'val_losses': List of validation losses per epoch (if validation_loader provided)
+                - 'stopped_early': Boolean indicating if training stopped early
+        
+        Note:
+            - The model must support ret_edge_out=True in its forward method
+            - Edge features are expected to be shape (batch_size, num_edges)
+            - Training uses Adam optimizer with weight decay of 1e-5
+        
+        Example:
+            >>> pretrain_loader = DataLoader(pretrain_dataset, batch_size=32)
+            >>> history = model.pretrain(pretrain_loader, epochs=50, verbose=True)
+            >>> print(f"Final loss: {history['train_losses'][-1]:.4f}")
+        """
+        self.to(device)
+        optim = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=1e-5) 
+        
+        # Target distribution: unit normal
+        P = torch.distributions.Normal(torch.zeros(self.edge_index.shape[1], device=device), torch.ones(self.edge_index.shape[1], device=device))
+        
+        for epoch in range(epochs): 
+            self.train()
+            
+            for batch_idx, (x, _) in enumerate(loader): 
+                optim.zero_grad()
+                x = x.to(device)
+                
+                edge_features = self.forward(x, ret_edge_out=True)  # Shape: (batch_size, num_edges)
+                
+                edge_mean = edge_features.mean(dim=0)  # Shape: (num_edges,)
+                edge_std = edge_features.std(dim=0) + 1e-8  # Add small epsilon for numerical stability
+                
+                # Create empirical distribution for each edge
+                Q = torch.distributions.Normal(edge_mean, edge_std)
+
+                loss = torch.distributions.kl_divergence(P, Q).mean()
+                
+                loss.backward()
+                optim.step()
+            
+            if verbose: 
+                print(f'Epoch {epoch+1}/{epochs}, Loss: {loss.item()}')
