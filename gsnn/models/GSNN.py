@@ -1176,36 +1176,48 @@ class GSNN(torch.nn.Module):
             return out
 
 
-    def get_node_activations(self, x, agg='sum'): 
-        for mod in self.ResBlocks: mod._store_activations = True
-        preds = self.forward(x)
+    def get_node_activations(self, x, agg='sum', inference=True):
 
-        activations = []
-        for mod in self.ResBlocks:  
-            activations.append(mod._last_activation.squeeze(-1)) 
-            del mod._last_activation
+        with torch.inference_mode(mode=inference):  
+            for mod in self.ResBlocks: mod._store_activations = True
+            preds = self.forward(x)
 
-        activations = torch.stack(activations, dim=0) 
+            activations = []
+            for mod in self.ResBlocks:  
+                activations.append(mod._last_activation.squeeze(-1)) 
+                del mod._last_activation
 
-        if agg == 'sum': 
-            activations = activations.sum(dim=0) 
-        elif agg == 'mean': 
-            activations = activations.mean(dim=0)
-        elif agg == 'max': 
-            activations = activations.max(dim=0).values
-        else: 
-            raise ValueError(f'Invalid aggregation method: {agg}')
+            activations = torch.stack(activations, dim=0) 
 
-        for mod in self.ResBlocks: mod._store_activations = False 
+            if agg == 'sum': 
+                activations = activations.sum(dim=0) 
+            elif agg == 'mean': 
+                activations = activations.mean(dim=0)
+            elif agg == 'max': 
+                activations = activations.max(dim=0).values
+            elif agg == 'last': 
+                activations = activations[-1, :, :] # L,B,C*N
+            elif agg == 'all': 
+                activations = activations.permute(1, 0, 2) # (L, B, CN) -> (B, L, CN)
+            else: 
+                raise ValueError(f'Invalid aggregation method: {agg}')
 
-        node_activation_dict = {}
-        for i in range(int(self.ResBlocks[0].channel_groups.max().item()) + 1): 
-            ixs = (self.ResBlocks[0].channel_groups == i).to(activations.device)
-            node_acts = activations[:, ixs] 
-            node_name = self.homo_names[i] 
-            node_activation_dict[node_name] = node_acts 
+            for mod in self.ResBlocks: mod._store_activations = False 
 
-        return node_activation_dict
+            node_activation_dict = {}
+            for i in range(int(self.ResBlocks[0].channel_groups.max().item()) + 1): 
+                ixs = (self.ResBlocks[0].channel_groups == i).to(activations.device)
+                
+                if len(activations.shape) == 2: 
+                    node_acts = activations[:, ixs] 
+                elif len(activations.shape) == 3: 
+                    B, L, CN = activations.shape 
+                    node_acts = activations[:, :, ixs].reshape(B, -1)
+
+                node_name = self.homo_names[i] 
+                node_activation_dict[node_name] = node_acts 
+
+            return node_activation_dict
 
     def get_node_attention(self, x):
         """Return per-layer node-level attention weights.
