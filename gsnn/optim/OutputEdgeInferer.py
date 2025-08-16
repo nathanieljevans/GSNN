@@ -20,9 +20,29 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import explained_variance_score
 import math
+import scipy.special
 
 
-class OutputEdgeInferrer(torch.nn.Module):
+def _safe_corrcoef(a, b):
+            if a.size == 0 or b.size == 0:
+                return np.nan
+            if np.std(a) == 0 or np.std(b) == 0:
+                return np.nan
+            return float(np.corrcoef(a, b)[0, 1])
+
+def _safe_evs(y_true, y_pred):
+    try:
+        if y_true.size == 0 or y_pred.size == 0:
+            return np.nan
+        # If y_true is constant, EVS is undefined; return 0 to be conservative
+        if np.allclose(np.std(y_true), 0.0):
+            return 0.0
+        return float(explained_variance_score(y_true, y_pred))
+    except Exception:
+        return np.nan
+
+
+class OutputEdgeInferer(torch.nn.Module):
     '''
     Learns per-function-node linear mappings from channel activations to outputs.
 
@@ -105,7 +125,7 @@ class OutputEdgeInferrer(torch.nn.Module):
         )
 
 
-    def fit(self, dataloader, model, epochs=None):
+    def fit(self, dataloader, model, epochs=None, device='cpu', verbose=True):
         '''
         Fit the per-node linear mappings using batches from a dataloader.
 
@@ -127,11 +147,19 @@ class OutputEdgeInferrer(torch.nn.Module):
         epochs_without_improve = 0
 
         # Ensure BN runs in training mode to update running stats
-        super().train(True)
+        self.train() 
+        self = self.to(device)
+
+        if verbose: print(f"Fitting OutputEdgeInferer on {device}...")
+        if verbose: print('# parameters: ', sum(p.numel() for p in self.parameters()))
 
         for _ in range(epochs):
             epoch_losses = []
-            for x, y in dataloader:
+            for i, (x, y) in enumerate(dataloader):
+
+                x = x.to(device)
+                y = y.to(device)
+
                 with torch.no_grad():
                     a_dict = model.get_node_activations(x, agg=self.agg)
 
@@ -139,11 +167,10 @@ class OutputEdgeInferrer(torch.nn.Module):
                 a = torch.stack(
                     [a_dict[node] for node in self.data.node_names_dict['function']],
                     dim=-1,
-                )
-                a = a.to(self.W.device)
+                ).to(device)
+
                 if self.use_batchnorm:
                     a = self._normalize(a, training=True)
-                y = y.to(self.W.device)
 
                 # Forward: (B, C, N) -> (N, B, O)
                 yhat = self.forward(a)
@@ -152,13 +179,15 @@ class OutputEdgeInferrer(torch.nn.Module):
                 y_expanded = y.unsqueeze(0).expand_as(yhat)
 
                 # Mean over batch, sum over nodes and outputs
-                mse = torch.mean((yhat - y_expanded) ** 2, dim=1).sum()
+                mse = torch.mean((yhat - y_expanded) ** 2, dim=1).mean()
 
                 self.optim.zero_grad()
                 mse.backward()
                 self.optim.step()
 
                 epoch_losses.append(mse.detach().item())
+            
+                if verbose: print(f"[batch {i}/{len(dataloader)} loss: {mse.detach().item()}]", end='\r')
 
             epoch_loss = float(np.mean(epoch_losses)) if epoch_losses else 0.0
             loss_history.append(epoch_loss)
@@ -171,6 +200,8 @@ class OutputEdgeInferrer(torch.nn.Module):
                 epochs_without_improve += 1
                 if epochs_without_improve >= self.patience:
                     break
+
+            if verbose: print(f'epoch {_} loss: {epoch_loss}')
 
         return loss_history
 
@@ -196,9 +227,9 @@ class OutputEdgeInferrer(torch.nn.Module):
         out = torch.bmm(a, self.W)
         return out
 
-    def evaluate(self, dataloader, model):
+    def evaluate(self, dataloader, model, device='cpu', verbose=True):
         '''
-        Evaluate per-node predictive power across a full dataset.
+        Evaluate per-node predictive power across a full dataset using streaming statistics.
 
         Args:
             dataloader: Iterable yielding tuples (x, y) with shapes x=?, y=(B, O).
@@ -211,7 +242,13 @@ class OutputEdgeInferrer(torch.nn.Module):
             - r2_gain, r_gain, mse_gain
             - p_value: one-sided p-value testing improvement (r2_gain > 0), via paired
               mean-squared-error test with normal approximation over samples.
-            - q_value: Benjamini–Hochberg FDR-adjusted p-value.
+            - q_value: Benjamini-Hochberg FDR-adjusted p-value.
+            - snr: Signal-to-Noise Ratio (Var(predictions) / MSE). Higher values indicate
+              stronger signal from function node to output.
+            - l1_norm: L1 norm of weights (sparsity-promoting). Lower values = sparser model.
+            - l2_norm: L2 norm of weights (regularization). Lower values = smaller weights.
+            - sparsity: Fraction of weights close to zero. Higher values = sparser model.
+            - eff_rank: Effective rank measure. Lower values = simpler model.
 
         p-value meaning:
         - Null hypothesis: the edge-specific predictor does not reduce expected MSE vs the
@@ -225,124 +262,248 @@ class OutputEdgeInferrer(torch.nn.Module):
         '''
 
         # Use running stats for normalization during evaluation
-        super().eval()
+        self.eval() 
+        self = self.to(device)
+
+        if verbose: print(f"Evaluating OutputEdgeInferer on {device}...")
 
         function_nodes = self.data.node_names_dict['function']
         output_nodes = self.data.node_names_dict['output']
         N = len(function_nodes)
         O = len(output_nodes)
 
-        preds = [[[] for _ in range(O)] for _ in range(N)]  # per (i,j) -> list of arrays (B,)
-        trues = [[[] for _ in range(O)] for _ in range(N)]
+        # Initialize vectorized streaming statistics 
+        # Shape: (N, O) for node pairs, (O,) for model stats
+        node_n = np.zeros((N, O), dtype=np.int64)
+        node_sum_x = np.zeros((N, O), dtype=np.float64)
+        node_sum_y = np.zeros((N, O), dtype=np.float64)
+        node_sum_x2 = np.zeros((N, O), dtype=np.float64)
+        node_sum_y2 = np.zeros((N, O), dtype=np.float64)
+        node_sum_xy = np.zeros((N, O), dtype=np.float64)
+        node_sum_se = np.zeros((N, O), dtype=np.float64)
+        node_sum_diff = np.zeros((N, O), dtype=np.float64)
+        node_sum_diff2 = np.zeros((N, O), dtype=np.float64)
 
-        model_preds = [[] for _ in range(O)]  # per j -> list of arrays (B,)
-        model_trues = [[] for _ in range(O)]
+        # Model statistics (O,)
+        model_n = np.zeros(O, dtype=np.int64)
+        model_sum_x = np.zeros(O, dtype=np.float64)
+        model_sum_y = np.zeros(O, dtype=np.float64)
+        model_sum_x2 = np.zeros(O, dtype=np.float64)
+        model_sum_y2 = np.zeros(O, dtype=np.float64)
+        model_sum_xy = np.zeros(O, dtype=np.float64)
+        model_sum_se = np.zeros(O, dtype=np.float64)
 
-        for x, y in dataloader:
+        for bi, (x, y) in enumerate(dataloader):
+
+            x = x.to(device)
+            y = y.to(device)
+
             with torch.inference_mode():
                 a_dict = model.get_node_activations(x, agg=self.agg)
-                a = torch.stack([a_dict[node] for node in function_nodes], dim=-1).to(self.W.device)
+                a = torch.stack([a_dict[node] for node in function_nodes], dim=-1).to(device)
                 if self.use_batchnorm:
                     a = self._normalize(a, training=False)
                 yhat_nodes = self.forward(a)  # (N, B, O)
                 yhat_model = model(x)  # (B, O)
 
-            y_np = y.detach().cpu().numpy()
-            yhat_model_np = yhat_model.detach().cpu().numpy()
-
-            for j in range(O):
-                model_trues[j].append(y_np[:, j])
-                model_preds[j].append(yhat_model_np[:, j])
-
+            y_np = y.detach().cpu().numpy()  # (B, O)
+            yhat_model_np = yhat_model.detach().cpu().numpy()  # (B, O)
             yhat_nodes_np = yhat_nodes.detach().cpu().numpy()  # (N, B, O)
-            for i in range(N):
-                for j in range(O):
-                    preds[i][j].append(yhat_nodes_np[i, :, j])
-                    trues[i][j].append(y_np[:, j])
 
-        def _safe_corrcoef(a, b):
-            if a.size == 0 or b.size == 0:
-                return np.nan
-            if np.std(a) == 0 or np.std(b) == 0:
-                return np.nan
-            return float(np.corrcoef(a, b)[0, 1])
+            B = y_np.shape[0]
 
-        def _safe_evs(y_true, y_pred):
-            try:
-                if y_true.size == 0 or y_pred.size == 0:
-                    return np.nan
-                # If y_true is constant, EVS is undefined; return 0 to be conservative
-                if np.allclose(np.std(y_true), 0.0):
-                    return 0.0
-                return float(explained_variance_score(y_true, y_pred))
-            except Exception:
-                return np.nan
+            # Vectorized model statistics update
+            model_n += B
+            model_sum_x += np.sum(yhat_model_np, axis=0)  # (O,)
+            model_sum_y += np.sum(y_np, axis=0)  # (O,)
+            model_sum_x2 += np.sum(yhat_model_np ** 2, axis=0)  # (O,)
+            model_sum_y2 += np.sum(y_np ** 2, axis=0)  # (O,)
+            model_sum_xy += np.sum(yhat_model_np * y_np, axis=0)  # (O,)
+            model_sum_se += np.sum((yhat_model_np - y_np) ** 2, axis=0)  # (O,)
 
-        # Aggregate metrics per (func, output)
-        res = {"func_node": [], "output_node": [], "mse": [], "r2": [], "r": [], "has_edge": [], "p_value": []}
+            # Vectorized node statistics update using broadcasting
+            # Reshape for broadcasting: y_np (B, O) -> (1, B, O), yhat_model_np (B, O) -> (1, B, O)
+            y_broadcast = y_np[np.newaxis, :, :]  # (1, B, O)
+            yhat_model_broadcast = yhat_model_np[np.newaxis, :, :]  # (1, B, O)
+            
+            # yhat_nodes_np is already (N, B, O)
+            # Compute all statistics using broadcasting
+            node_n += B  # (N, O) += scalar
+            node_sum_x += np.sum(yhat_nodes_np, axis=1)  # (N, O)
+            node_sum_y += np.sum(y_broadcast, axis=1)  # (N, O)
+            node_sum_x2 += np.sum(yhat_nodes_np ** 2, axis=1)  # (N, O)
+            node_sum_y2 += np.sum(y_broadcast ** 2, axis=1)  # (N, O)
+            node_sum_xy += np.sum(yhat_nodes_np * y_broadcast, axis=1)  # (N, O)
+            node_sum_se += np.sum((yhat_nodes_np - y_broadcast) ** 2, axis=1)  # (N, O)
+            
+            # Compute paired differences for p-value: (node_pred - true)² - (model_pred - true)²
+            node_errors = (yhat_nodes_np - y_broadcast) ** 2  # (N, B, O)
+            model_errors = (yhat_model_broadcast - y_broadcast) ** 2  # (1, B, O)
+            diff = node_errors - model_errors  # (N, B, O)
+            
+            node_sum_diff += np.sum(diff, axis=1)  # (N, O)
+            node_sum_diff2 += np.sum(diff ** 2, axis=1)  # (N, O)
+
+            if verbose: print(f"[batch {bi}/{len(dataloader)}]", end='\r')
+
+        # Compute final metrics from accumulated statistics
+        
+        # Vectorized model metrics computation
+        model_mse = np.where(model_n > 0, model_sum_se / model_n, np.nan)
+        
+        # Vectorized correlation and explained variance for model
+        model_mean_x = np.where(model_n > 0, model_sum_x / model_n, 0)
+        model_mean_y = np.where(model_n > 0, model_sum_y / model_n, 0)
+        model_var_x = np.where(model_n > 0, (model_sum_x2 / model_n) - model_mean_x ** 2, 0)
+        model_var_y = np.where(model_n > 0, (model_sum_y2 / model_n) - model_mean_y ** 2, 0)
+        model_cov_xy = np.where(model_n > 0, (model_sum_xy / model_n) - model_mean_x * model_mean_y, 0)
+        
+        # Correlation coefficient
+        model_r = np.where(
+            (model_n > 1) & (model_var_x > 0) & (model_var_y > 0),
+            model_cov_xy / np.sqrt(model_var_x * model_var_y),
+            np.where(model_n > 0, 0, np.nan)
+        )
+        
+        # Explained variance score
+        model_r2 = np.where(
+            (model_n > 1) & (model_var_y > 0),
+            np.maximum(0.0, 1.0 - model_mse / model_var_y),
+            np.where(model_n > 0, 0, np.nan)
+        )
+
+        # Build model dataframe
+        rdf = pd.DataFrame({
+            "output_node": output_nodes,
+            "model_r2": model_r2,
+            "model_r": model_r,
+            "model_mse": model_mse
+        })
+
+        # Vectorized node metrics computation
+        node_mse = np.where(node_n > 0, node_sum_se / node_n, np.nan)
+        
+        # Vectorized correlation and explained variance for nodes
+        node_mean_x = np.where(node_n > 0, node_sum_x / node_n, 0)
+        node_mean_y = np.where(node_n > 0, node_sum_y / node_n, 0)
+        node_var_x = np.where(node_n > 0, (node_sum_x2 / node_n) - node_mean_x ** 2, 0)
+        node_var_y = np.where(node_n > 0, (node_sum_y2 / node_n) - node_mean_y ** 2, 0)
+        node_cov_xy = np.where(node_n > 0, (node_sum_xy / node_n) - node_mean_x * node_mean_y, 0)
+        
+        # Correlation coefficient
+        node_r = np.where(
+            (node_n > 1) & (node_var_x > 0) & (node_var_y > 0),
+            node_cov_xy / np.sqrt(node_var_x * node_var_y),
+            np.where(node_n > 0, 0, np.nan)
+        )
+        
+        # Explained variance score
+        node_r2 = np.where(
+            (node_n > 1) & (node_var_y > 0),
+            np.maximum(0.0, 1.0 - node_mse / node_var_y),
+            np.where(node_n > 0, 0, np.nan)
+        )
+        
+        # Signal-to-Noise Ratio (SNR) computation for model selection
+        # SNR = Var(predicted_output) / Var(residuals) = Var(predicted) / MSE
+        # Higher SNR indicates stronger signal from function to output
+        node_snr = np.where(
+            (node_n > 1) & (node_mse > 0) & (node_var_x > 0),
+            node_var_x / node_mse,
+            0.0
+        )
+        
+        # Model complexity metrics using trained weights
+        # Get weights on CPU for computation: self.W shape is (N, C, O)
+        W_cpu = self.W.detach().cpu().numpy()  # (N, C, O)
+        
+        # L1 norm (sparsity-promoting): sum of absolute weights per (function, output)
+        node_l1_norm = np.sum(np.abs(W_cpu), axis=1)  # (N, O)
+        
+        # L2 norm (weight magnitude): Euclidean norm per (function, output)  
+        node_l2_norm = np.sqrt(np.sum(W_cpu ** 2, axis=1))  # (N, O)
+        
+        # Weight sparsity: fraction of weights close to zero (< 1e-6)
+        sparsity_threshold = 1e-6
+        node_sparsity = np.mean(np.abs(W_cpu) < sparsity_threshold, axis=1)  # (N, O)
+        
+        # Effective rank: number of significant singular values (> 1% of max)
+        node_eff_rank = np.zeros((N, O))
+        for i in range(N):
+            for j in range(O):
+                w_vec = W_cpu[i, :, j]  # (C,)
+                if np.any(np.abs(w_vec) > 1e-12):  # avoid zero vectors
+                    # For 1D weight vector, effective rank is just whether it's non-zero
+                    node_eff_rank[i, j] = 1.0 if np.std(w_vec) > 1e-6 else 0.0
+                else:
+                    node_eff_rank[i, j] = 0.0
+        
+        # Vectorized p-value computation
+        node_d_mean = np.where(node_n > 0, node_sum_diff / node_n, 0)
+        node_d_var = np.where(node_n > 0, (node_sum_diff2 / node_n) - node_d_mean ** 2, 0)
+        node_d_std = np.sqrt(np.maximum(0, node_d_var))
+        
+        # Compute z-scores
+        node_z = np.where(
+            (node_n >= 5) & (node_d_std > 0),
+            node_d_mean / (node_d_std / np.sqrt(node_n)),
+            0
+        )
+        
+        # One-sided normal CDF for alternative mean<0
+        # Using vectorized error function
+        node_pval = np.where(
+            (node_n >= 5) & (node_d_std > 0),
+            0.5 * (1.0 + scipy.special.erf(node_z / np.sqrt(2.0))),
+            1.0
+        )
+        node_pval = np.where(node_n > 0, node_pval, 1.0)
+        
+        # Build node dataframe using vectorized operations
+        func_nodes_flat = []
+        output_nodes_flat = []
+        mse_flat = []
+        r2_flat = []
+        r_flat = []
+        has_edge_flat = []
+        pval_flat = []
+        snr_flat = []
+        l1_norm_flat = []
+        l2_norm_flat = []
+        sparsity_flat = []
+        eff_rank_flat = []
+        
         for i, fi in enumerate(function_nodes):
             for j, oj in enumerate(output_nodes):
-                y_true = np.concatenate(trues[i][j]) if trues[i][j] else np.array([])
-                y_pred = np.concatenate(preds[i][j]) if preds[i][j] else np.array([])
-                y_pred_model = np.concatenate(model_preds[j]) if model_preds[j] else np.array([])
+                func_nodes_flat.append(fi)
+                output_nodes_flat.append(oj)
+                mse_flat.append(node_mse[i, j])
+                r2_flat.append(node_r2[i, j])
+                r_flat.append(node_r[i, j])
+                has_edge_flat.append((fi, oj) in self.edges)
+                pval_flat.append(node_pval[i, j])
+                snr_flat.append(node_snr[i, j])
+                l1_norm_flat.append(node_l1_norm[i, j])
+                l2_norm_flat.append(node_l2_norm[i, j])
+                sparsity_flat.append(node_sparsity[i, j])
+                eff_rank_flat.append(node_eff_rank[i, j])
+        
+        res = pd.DataFrame({
+            "func_node": func_nodes_flat,
+            "output_node": output_nodes_flat,
+            "mse": mse_flat,
+            "r2": r2_flat,
+            "r": r_flat,
+            "has_edge": has_edge_flat,
+            "p_value": pval_flat,
+            "snr": snr_flat,
+            "l1_norm": l1_norm_flat,
+            "l2_norm": l2_norm_flat,
+            "sparsity": sparsity_flat,
+            "eff_rank": eff_rank_flat
+        })
 
-                if y_true.size > 0:
-                    mse = float(np.mean((y_pred - y_true) ** 2))
-                    r2 = _safe_evs(y_true, y_pred)
-                    r = _safe_corrcoef(y_pred, y_true)
-                    # One-sided p-value for improvement: mean((e_node - e_model)) < 0
-                    n = min(y_true.size, y_pred_model.size)
-                    if n >= 5:
-                        yt = y_true[:n]
-                        yn = y_pred[:n]
-                        yb = y_pred_model[:n]
-                        d = (yn - yt) ** 2 - (yb - yt) ** 2
-                        d_mean = float(np.mean(d))
-                        d_std = float(np.std(d, ddof=1)) if n > 1 else 0.0
-                        if d_std > 0:
-                            z = d_mean / (d_std / np.sqrt(n))
-                            # One-sided normal CDF for alternative mean<0
-                            pval = float(0.5 * (1.0 + math.erf(z / np.sqrt(2.0))))
-                        else:
-                            pval = 1.0
-                    else:
-                        pval = 1.0
-                else:
-                    mse = np.nan
-                    r2 = np.nan
-                    r = np.nan
-                    pval = 1.0
 
-                res["func_node"].append(fi)
-                res["output_node"].append(oj)
-                res["mse"].append(mse)
-                res["r2"].append(r2)
-                res["r"].append(r)
-                res["has_edge"].append((fi, oj) in self.edges)
-                res["p_value"].append(pval)
-
-        # Baseline model metrics per output
-        rdf = {"output_node": [], "model_r2": [], "model_r": [], "model_mse": []}
-        for j, oj in enumerate(output_nodes):
-            y_true = np.concatenate(model_trues[j]) if model_trues[j] else np.array([])
-            y_pred = np.concatenate(model_preds[j]) if model_preds[j] else np.array([])
-
-            if y_true.size > 0:
-                mse = float(np.mean((y_pred - y_true) ** 2))
-                r2 = _safe_evs(y_true, y_pred)
-                r = _safe_corrcoef(y_pred, y_true)
-            else:
-                mse = np.nan
-                r2 = np.nan
-                r = np.nan
-
-            rdf["output_node"].append(oj)
-            rdf["model_r2"].append(r2)
-            rdf["model_r"].append(r)
-            rdf["model_mse"].append(mse)
-
-        rdf = pd.DataFrame(rdf)
-        res = pd.DataFrame(res)
 
         res = res.merge(rdf, on='output_node', how='left')
 
@@ -364,17 +525,22 @@ class OutputEdgeInferrer(torch.nn.Module):
         q_values[order] = bh
         res["q_value"] = q_values
 
+        # Add SNR-based ranking within each output (1 = highest SNR/strongest signal)
+        res = res.sort_values(['output_node', 'snr'], ascending=[True, False]).reset_index(drop=True)
+        res = res.assign(snr_rank=lambda x: x.groupby('output_node').cumcount() + 1)
+        
+        # Add sparsity-based ranking within each output (1 = most sparse/simplest)
+        res = res.sort_values(['output_node', 'sparsity'], ascending=[True, False]).reset_index(drop=True)
+        res = res.assign(sparsity_rank=lambda x: x.groupby('output_node').cumcount() + 1)
+        
+        # Add within output rank based on q-value (1 = most significant)
+        res = res.sort_values(['output_node', 'q_value'], ascending=[True, True]).reset_index(drop=True)
+        res = res.assign(within_output_rank=lambda x: x.groupby('output_node').cumcount() + 1)
+        
+        # Sort by r2_gain for final output
         res = res.sort_values(by='r2_gain', ascending=False).reset_index(drop=True)
 
-        # add within output rank (most likely per output node)
-        res = res.sort_values(by='q_value', ascending=True).reset_index(drop=True)
-        res = res.assign(within_output_rank=lambda x: x.groupby('output_node').cumcount() + 1)
-
         return res
-
-    # Backwards-compatible alias to the new evaluation API (now expects a dataloader)
-    def eval(self, dataloader, model):
-        return self.evaluate(dataloader, model)
 
     def _normalize(self, a, training=True):
         '''
