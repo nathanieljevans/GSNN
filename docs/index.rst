@@ -1,6 +1,6 @@
 .. GSNN documentation master file
 
-Welcome to GSNN's documentation!
+Welcome to GSNN's Documentation!
 ================================
 
 The **Graph Structured Neural Networks (GSNN)** library provides flexible and scalable tools for learning on graph-structured data.
@@ -28,7 +28,7 @@ The **Graph Structured Neural Networks (GSNN)** library provides flexible and sc
    api/index
 
 
-Indices and tables
+Indices and Tables
 ==================
 
 * :ref:`genindex`

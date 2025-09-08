@@ -1175,7 +1175,6 @@ class GSNN(torch.nn.Module):
             out = edge2node(x, self.edge_index, self.output_node_mask)[:, self.output_node_mask]
             return out
 
-
     def get_node_activations(self, x, agg='sum', inference=True):
 
         with torch.inference_mode(mode=inference):  
@@ -1211,7 +1210,7 @@ class GSNN(torch.nn.Module):
                 if len(activations.shape) == 2: 
                     node_acts = activations[:, ixs] 
                 elif len(activations.shape) == 3: 
-                    B, L, CN = activations.shape 
+                    B, L, CN = activations.shape
                     node_acts = activations[:, :, ixs].reshape(B, -1)
 
                 node_name = self.homo_names[i] 

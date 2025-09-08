@@ -179,7 +179,7 @@ Robustness and Stability Methods
 
 **Noise Tunnel**
 
-The Noise Tunnel method enhances the stability and robustness of gradient-based explainers by running them multiple times with Gaussian noise injected into the edge-mask space, then aggregating the results. This approach is inspired by SmoothGrad but adapted specifically for GSNN's edge-based architecture.
+The Noise Tunnel method enhances the stability and robustness of gradient-based explainers by running them multiple times with Gaussian noise injected into the edge-mask space, then aggregating the results. This approach is inspired by SmoothGrad but is adapted specifically for GSNN's edge-based architecture.
 
 *What the results indicate:*
   * **Smoothed attribution scores** that are more robust to model sensitivity
@@ -223,8 +223,8 @@ Choosing the Right Explainer
   * Compare results across multiple explainers for validation
 
 **Computational Considerations:**
-  * **Fastest:** IG Explainer, Counterfactual Explainer
-  * **Moderate:** GSNN Explainer, Noise Tunnel
+  * **Fastest:** IG Explainer
+  * **Moderate:** GSNN Explainer
   * **Slowest:** Occlusion-based methods (scale with graph size)
 
 .. note::

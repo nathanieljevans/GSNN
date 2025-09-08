@@ -4,38 +4,38 @@ Methods
 Graph Structured Neural Network (GSNN)
 --------------------------------------
 
-Graph Structured Neural Networks (GSNN) were originally designed to model biological signaling networks by **constraining** a neural network with the structure described by a user-defined *graph* :math:`\mathcal{G}`.  The graph encodes the molecular entities (*nodes*) and their interactions (*edges*), thereby defining which variables may directly influence each other during learning. The GSNN architecture is best conceptualized of as univariate edge features that are transformed over sequential layer operations. The transformations are constrained by the user-defined graph and the function nodes learn relationships between input and output edges. This approach effectively handles cyclic graphs and can scale to deep networks able to propagate information long distances through the graph.  
+Graph Structured Neural Networks (GSNN) were originally designed to model biological signaling networks by **constraining** a neural network with the structure described by a user-defined *graph* :math:`\mathcal{G}`. The graph encodes the molecular entities (*nodes*) and their interactions (*edges*), thereby defining which variables may directly influence each other during learning. The GSNN architecture is best conceptualized as univariate edge features that are transformed over sequential layer operations. The transformations are constrained by the user-defined graph, and the function nodes learn relationships between input and output edges. This approach effectively handles cyclic graphs and can scale to deep networks able to propagate information long distances through the graph.  
 
 The architecture employs three types of nodes:
 
 * **Input nodes** – observed variables
-* **Function nodes** – latent variables parameterised by neural networks
+* **Function nodes** – latent variables parameterized by neural networks
 * **Output nodes** – target variables
 
-Only *function nodes* are trainable; input and output nodes pass/receive information through the network unchanged.
+Only *function nodes* are trainable; input and output nodes pass and receive information through the network unchanged.
 
 .. image:: ./gsnn_overview.png
    :width: 100%
    :alt: GSNN Overview
    :align: center
 
-A toy example demonstrating how any given graph structure can be formulated as a feed-forward neural network with sparse weight matrices. Each yellow node in the left graph represents a fully-connected one-layer neural network with two hidden channels (function nodes). Panel A shows the structural graph (:math:`\mathcal{G}`) that constrains the GSNN model, while panel B depicts how edge latent values (:math:`e_i`) are updated in a single forward pass. Sparse weight matrices omit nonexistent edges, and the ⊕ symbol indicates a residual connection from the previous layer.
+A toy example demonstrating how any given graph structure can be formulated as a feed-forward neural network with sparse weight matrices. Each yellow node in the left graph represents a fully connected one-layer neural network with two hidden channels (function nodes). Panel A shows the structural graph (:math:`\mathcal{G}`) that constrains the GSNN model, while Panel B depicts how edge latent values (:math:`e_i`) are updated in a single forward pass. Sparse weight matrices omit nonexistent edges, and the ⊕ symbol indicates a residual connection from the previous layer.
 
 .. raw:: html
 
    <br/>
    
 .. note::
-    Unlike GNNs, where latent representations typically characterize the state of a *node*, GSNN latent representations characterize the state of an *edge*. This allows the GSNN method to learn nonlinear multivariate relationships between input edges and output edges and still be applicable to cyclic graphs.
+    Unlike GNNs, where latent representations typically characterize the state of a *node*, GSNN latent representations characterize the state of an *edge*. This allows the GSNN method to learn nonlinear multivariate relationships between input edges and output edges while still being applicable to cyclic graphs.
 
 
 Function Nodes
 ^^^^^^^^^^^^^^
 Each function node :math:`f_n` is implemented as a small fully-connected feed-forward network whose shape is determined by the local topology of :math:`\mathcal{G}`:
 
-* **Inputs**  – equal to the in-degree of node *n*
+* **Inputs** – equal to the in-degree of node *n*
 * **Outputs** – equal to the out-degree of node *n*
-* **Hidden channels / layers** – user-defined hyper-parameters. While GSNN could theoretically use multi-layer neural networks to parameterize function nodes, we have found that single-layer networks are sufficient for most applications and currently do not support multi-layer networks.
+* **Hidden channels/layers** – user-defined hyperparameters. While GSNN could theoretically use multi-layer neural networks to parameterize function nodes, we have found that single-layer networks are sufficient for most applications and currently do not support multi-layer networks.
 
 .. note::
     To avoid confusion, we use the term *layer* to refer to the number of sequential sparse linear layers that propagate information across the entire graph. The neural networks that parameterize function nodes are fixed to a single layer.
@@ -43,7 +43,7 @@ Each function node :math:`f_n` is implemented as a small fully-connected feed-fo
 
 Layer Updates with Masked Linear Layers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-A single GSNN layer updates **edge** representations via a *sparse linear operation*.  The weight matrix has shape :math:`(E, N \times C)` where
+A single GSNN layer updates **edge** representations via a *sparse linear operation*. The weight matrix has shape :math:`(E, N \times C)` where
 
 * :math:`E` – number of edges in :math:`\mathcal{G}`
 * :math:`N` – number of function nodes
@@ -57,10 +57,10 @@ Iterating the update *L* times enables information to travel a path length of *L
 
 Sparse Implementation
 ^^^^^^^^^^^^^^^^^^^^^
-A dense implementation of the masked matrices would quickly exhaust memory on realistic graphs.  Instead, GSNN stores the matrices as **sparse tensors**, reducing both memory and compute.  The current PyTorch sparse backend is not optimised for mini-batching, so GSNN leverages **PyTorch Geometric** for fast batched sparse matrix multiplication, especially on GPUs.
+A dense implementation of the masked matrices would quickly exhaust memory on realistic graphs. Instead, GSNN stores the matrices as **sparse tensors**, reducing both memory and compute. The current PyTorch sparse backend is not optimized for mini-batching, so GSNN leverages **PyTorch Geometric** for fast batched sparse matrix multiplication, especially on GPUs.
 
 
-Residual Connections & Normalisation
+Residual Connections & Normalization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 GSNN is [optionally] a residual architecture where the layer output is added to its input:
 
@@ -70,62 +70,74 @@ GSNN is [optionally] a residual architecture where the layer output is added to 
 
 Residual connections allow the model to learn *edge latency*—the temporal lag between upstream and downstream signals—and alleviate vanishing gradients in deep networks.
 
-* **Normalisation** – We provide several normalization options:
-    * **None** – No normalization is applied.
-    * **Batch** – Batch normalization is applied to the entire graph. This approach works well for large batches and is applicable to small channel sizes.
-    * **Layer** – Layer normalization is applied within each function node. This approach works well for small batches with large channel sizes. 
-    * **Softmax** – Softmax normalization is applied to the entire graph.
-* **Self-edges** – Optional self-connections let a node incorporate its previous-layer state.
+* **Normalization** – We provide several normalization options:
+    * **layer** – Group layer normalization applied within each function node. Works well for small batches with large channel sizes.
+    * **batch** – Standard batch normalization applied within each node channel. Works well for large batches and small channel sizes.
+    * **groupbatch** – Group-wise batch normalization that normalizes within channel groups.
+    * **edgebatch** – Edge-level batch normalization applied before the sparse linear operations.
+    * **softmax** – Softmax normalization applied within function nodes (activations sum to 1 per node).
+    * **rms** – Root Mean Square normalization, simpler and more stable than layer norm for small batches.
+    * **ema** – Exponential Moving Average normalization for more stable training.
+    * **channelema** – Channel-wise EMA normalization.
+    * **none** – No normalization is applied.
+* **Self-edges** – Optional addition of self-edges in the structural graph, which allows dependence on the previous layer state.
 * **Parameter sharing** – While GSNN supports weight sharing across layers, empirical results typically show better performance when each layer has its own parameters.
+* **Node MLPs** – Optional additional MLP processing per node to enhance representational capacity while maintaining graph structure constraints.
+* **Node attention** – Optional attention mechanism applied to node representations.
+* **Learnable residual weights** – Residual connections can use learnable scaling factors.
 
 
-Weight Initialisation
+Weight Initialization
 ^^^^^^^^^^^^^^^^^^^^^
-GSNN offers both **Kaiming/He** and **Xavier/Glorot** initialisation adapted to the graph setting.  Let :math:`D_i^{in}` and :math:`D_i^{out}` be the in- and out-degree of function node *i* in :math:`\mathcal{G}`.  Then
+GSNN offers comprehensive weight initialization strategies adapted to the graph setting. Let :math:`D_i^{in}` and :math:`D_i^{out}` be the in- and out-degree of function node *i* in :math:`\mathcal{G}`. The following initialization methods are available:
 
-.. math::
+* **Xavier/Glorot methods**:
+  * ``xavier_uniform``: Uniform distribution scaled by :math:`\sqrt{\frac{6}{D_i^{in}+D_i^{out}}}`
+  * ``xavier_normal``: Normal distribution scaled by :math:`\sqrt{\frac{2}{D_i^{in}+D_i^{out}}}`
 
-   w^{\text{kaiming}}_i &\sim \mathcal{N}\!\bigl(0, \tfrac{2}{D_i^{in}}\bigr) \\
-   w^{\text{xavier}}_i  &\sim \mathcal{N}\!\bigl(0, \tfrac{2}{D_i^{in}+D_i^{out}}\bigr)
+* **Kaiming/He methods**:
+  * ``kaiming_uniform``: Uniform distribution scaled by :math:`\sqrt{\frac{3}{D_i^{in}}}`
+  * ``kaiming_normal``: Normal distribution scaled by :math:`\sqrt{\frac{2}{D_i^{in}}}`
 
-Using degree-aware fan-in/out preserves the variance of activations despite the sparse, non-uniform connectivity.
+* **Simple distributions**:
+  * ``uniform``: Standard uniform distribution with configurable gain
+  * ``normal``: Standard normal distribution with configurable gain
+  * ``zeros``: Initialize all weights to zero
+
+* **Graph-aware initialization**:
+  * ``degree_normalized``: Applies GCN-style degree normalization :math:`D^{-0.5}AD^{-0.5}` to uniform weights
+
+Using degree-aware fan-in/fan-out preserves the variance of activations despite the sparse, non-uniform connectivity. The default initialization is ``degree_normalized``, which often performs well across different graph topologies.
 
 
-Efficient Mini-Batching
+Efficient Mini-batching
 ^^^^^^^^^^^^^^^^^^^^^^
-PyTorch's native sparse operations remain slow for large batches.  GSNN therefore reformulates the masked linear layers as a **PyTorch Geometric graph convolution**, gaining substantial speed-ups during training and inference—particularly on GPUs.
+PyTorch's native sparse operations remain slow for large batches. GSNN therefore reformulates the masked linear layers as **PyTorch Geometric graph convolution**, gaining substantial speedups during training and inference—particularly on GPUs. The implementation automatically handles batching of sparse operations and edge indices.
 
 
 Gradient Checkpointing
 ^^^^^^^^^^^^^^^^^^^^^^
 
-To reduce memory usage, GSNN supports **gradient checkpointing** at each layer, which substantially reduces memory usage at the cost of some compute.
+To reduce memory usage, GSNN supports **gradient checkpointing** at each layer, which substantially reduces memory usage at the cost of some additional compute during the backward pass.
 
 
-GSNNExplainer
---------------
+Advanced Features
+^^^^^^^^^^^^^^^^^
 
-GSNNs are interpretable by construction—each weight corresponds to a *specific* interaction in the prior knowledge graph—but a  This approach is inspired by [GNNExplainer](https://arxiv.org/abs/1903.03894). 
+**Node MLPs**
+GSNN supports optional Multi-Layer Perceptrons (MLPs) applied to each function node's representation. This enhances the representational capacity while maintaining graph structure constraints. The node MLPs process channels within each node independently, allowing for more complex transformations without violating the graph structure.
 
-Conceptually, GSNNExplainer asks the following question: *“Which edges must be present for the GSNN to make the same prediction for this sample?”*  Starting from the trained model it learns a binary mask :math:`\mathbf{m}\in\{0,1\}^{E}` that switches edges on or off during the forward pass.  The mask is found by solving
+**Node Attention**
+An optional attention mechanism can be applied to node representations, allowing the model to dynamically weight the importance of different nodes during computation.
 
-.. math::
-   \underset{\mathbf{m}}{\operatorname*{arg\,min}}\; \bigl\| f_{\mathbf{m}}(\mathbf{x}) - f(\mathbf{x}) \bigr\|_2^2 \; + \; \beta\,\lVert \mathbf{m} \rVert_1,
+**Edge Weights**
+GSNN supports weighted edges through the ``edge_weight_dict`` parameter, allowing different edge types to have learnable or fixed importance weights.
 
-where :math:`f_{\mathbf{m}}` denotes the masked GSNN and the :math:`\ell_1` term encourages sparsity.  Following Ying *et al.* (2019) we relax the discrete mask with a **Gumbel-Softmax** distribution so the objective is optimised end-to-end with standard SGD.
+**Flexible Residual Connections**
+Residual connections can use learnable scaling factors, providing more flexibility in how skip connections contribute to the final output. The residual weight can be learned during training or kept fixed.
 
-Key adaptations for GSNN
-^^^^^^^^^^^^^^^^^^^^^^^^
-• **Edge-centric explanations** – Because GSNN latent variables live on edges, the explainer manipulates *edge* activations rather than node embeddings.
+**Multiple Edge Channels**
+The model supports replicating edge features across multiple channels using the ``edge_channels`` parameter, enabling richer edge representations.
 
-• **Baseline comparisons** – Optionally, a user can provide a reference input :math:`\mathbf{x}_b` (e.g. an unperturbed control).  The explainer then targets the *difference* :math:`f(\mathbf{x})-f(\mathbf{x}_b)`, ensuring the extracted sub-graph highlights edges responsible for the observed change rather than global structure.
-
-• **Parsimony control** – The hyper-parameter :math:`\beta` (default 1) trades explanation fidelity for compactness.  Smaller values yield larger sub-graphs; larger values isolate only the most influential interactions.
-
-Practical use
-^^^^^^^^^^^^^
-In practice a few hundred optimisation steps with Adam are sufficient.  The output is a ranked edge list that can be visualised directly on the input graph, allowing researchers to trace the signalling routes that drive a specific phenotype or perturbation response.
-
-We find that GSNNExplainer typically selects 5–15 % of edges while preserving >95 % of the original predictive accuracy, providing a concise yet mechanistically meaningful summary of the model’s reasoning.
 
 

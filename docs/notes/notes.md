@@ -66,3 +66,42 @@ TODO: need to add documentation for graph equivalence testing. Very interesting 
 
 
 
+07/18/25
+
+
+Concept for inferring input-function, function-function and function-output edges. 
+
+Combining the ideas from inputEdgeInferrer and outputEdgeInferer, we can generalize the methods to any edge by creating a scoring mechanishm such that we can infer how well a given edge latent state ($h_ij$), can predict or correlate with another edge (\grad h_lm). For instance, strong correlation between: 
+
+$h_ij ~ \grad h_lm $ is suggestive that the model would benefit from an edge from nodes i (or j) to m. 
+
+So theoretically, we could infer this with a weight matrix trained on the gradients, e.g., 
+
+W_ij,lm * h_ij ~ \grad h_lm 
+
+or a scoring algorithm, such as: 
+
+score_{ij, lm} ~ abs( corr(h_ij, \grad h_lm) )
+
+Unfortunately, this task scales quadratically with the number of edges in the model. 
+
+# tests ~ E**2 
+
+For typical tasks, we often have on the order of 100,000 edges, which leads to 1e10 possible edges to test. This is unlikely to be tractable for two reasons: 
+
+- memory requirements for 1e10 parameters is going to be very expensive 
+- testing each edge group over the full training dataset would be extremely time consuming. 
+
+One thought to address this is to use the work from "How to turn your knowledge graph into a generative model" 
+
+For instance, if we parameterize a low-rank adjacency matrix with node-node decompositions, e.g,. A_ij = z_i * z_j. We can avoid large memory constraints. Additionally, we can use the generative model component to explore likely regions and avoid testing edges that are unlikely. 
+
+Procedure: 
+
+- initialize generative adjacency matrix g
+- for batch in data: 
+   - sample N edges from g 
+   - score each edge 
+   - update g to reflect the edge scores (high scores become more probable, low scores become less probable)
+
+- evaluation: compute the probabilities for each edge in the A and select the top most likely edges 
