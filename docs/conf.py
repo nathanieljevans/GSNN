@@ -50,10 +50,13 @@ autodoc_mock_imports = [
     "scipy",
     "networkx",
     "matplotlib",
+    "seaborn",
     "sklearn",
     "sklearn.metrics",
     "sklearn.linear_model",
     "sklearn.preprocessing",
+    "sklearn.multioutput",
+    "geomloss",
 ]
 
 templates_path = ['_templates']
@@ -63,7 +66,7 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 html_theme = 'pyg_sphinx_theme'
 html_static_path = ['_static']
-html_logo = '_static/logo.png'  # Adjust when logo is available
+# html_logo = '_static/logo.png'  # Disabled until logo is available
 html_theme_options = {
     # Mimic PyTorch Geometric navigation behaviour
     'collapse_navigation': False,
