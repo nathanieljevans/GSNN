@@ -4,10 +4,8 @@ name: gsnn
 
 channels: 
     - pytorch 
-    - nvidia 
     - pyg
     - conda-forge
-    - mcs07
     - defaults 
 
 dependencies:
