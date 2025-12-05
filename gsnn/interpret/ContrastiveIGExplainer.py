@@ -83,81 +83,249 @@ class ContrastiveIGExplainer:
         target_idx: Union[int, List[int]],
         *,
         jitter: Optional[torch.Tensor] = None,
+        target: str = 'edge',
+        reduction: str = 'mean',
     ) -> pd.DataFrame:
-        """Compute edge attributions for *f(x₁) − f(x₂)*.
+        """Compute attributions for *f(x₁) − f(x₂)*.
 
         Parameters
         ----------
-        x1, x2 : torch.Tensor  (shape: [B, N_in])
+        x1, x2 : torch.Tensor  (shape: [N_in], [1, N_in], or [B, N_in] for batch)
             Two input feature tensors.  They must have identical batch size and
-            ordering of nodes.
+            ordering of nodes. Each pair (x1[i], x2[i]) is explained.
         target_idx : int or list[int]
             Output dimension(s) to explain.  If a list is provided the
             attributions refer to the **sum** of those outputs.
-        """
+        jitter : torch.Tensor, optional
+            Optional noise to perturb the mask path.
+        target : str, optional (default='edge')
+            Whether to return 'edge' or 'node' level attributions.
+        reduction : str, optional (default='mean')
+            How to aggregate attributions across batch samples:
+            - 'mean': average attributions across samples (default)
+            - 'sum': sum attributions across samples
+            - 'none': return all per-sample attributions (adds 'sample_idx' column)
 
-        # ------------------------------------------------------------------
-        # 1.  Build mask path  m(α) = α · 1  ,  α ∈ [0,1]
-        # ------------------------------------------------------------------
+        Returns
+        -------
+        pd.DataFrame
+            If target='edge': columns ['source', 'target', 'score'] for edge attributions.
+            If target='node': columns ['node', 'score'] for node attributions.
+            If reduction='none': additional 'sample_idx' column for batch dimension.
+        """
+        if target not in ['edge', 'node']:
+            raise ValueError(f"target must be 'edge' or 'node', got '{target}'")
+        if reduction not in ['mean', 'sum', 'none']:
+            raise ValueError(f"reduction must be 'mean', 'sum', or 'none', got '{reduction}'")
+
+        if target == 'edge':
+            return self._compute_edge_attributions(x1, x2, target_idx, jitter, reduction)
+        else:
+            return self._compute_node_attributions(x1, x2, target_idx, jitter, reduction)
+
+    def _compute_edge_attributions(
+        self,
+        x1: torch.Tensor,
+        x2: torch.Tensor,
+        target_idx: Union[int, List[int]],
+        jitter: Optional[torch.Tensor] = None,
+        reduction: str = 'mean',
+    ) -> pd.DataFrame:
+        """Compute edge-level attributions for *f(x₁) − f(x₂)*."""
+        x1, x2 = x1.to(self.device), x2.to(self.device)
+        
+        # Ensure batch dimension
+        if x1.dim() == 1:
+            x1 = x1.unsqueeze(0)
+        if x2.dim() == 1:
+            x2 = x2.unsqueeze(0)
+        
+        B = x1.size(0)  # batch size
         T = self.n_steps + 1  # number of points along the path (baseline included)
-        alphas = torch.linspace(0.0, 1.0, T, device=self.device).view(-1, 1)  # (T,1)
+        
+        if isinstance(target_idx, int):
+            target_idx = [target_idx]
 
         # -------------------------------------------------------------
-        # Optionally perturb the straight-line mask with *jitter*
+        # Build base mask (optionally perturbed with jitter)
         # -------------------------------------------------------------
         base_mask = torch.ones((1, self.E), device=self.device)
         if jitter is not None:
             jitter = jitter.to(self.device)
             if jitter.dim() == 1:
                 jitter = jitter.unsqueeze(0)
-            # multiplicative perturbation, then clip
             base_mask = torch.clamp(base_mask * (1.0 + jitter), 0.0, 1.0)
 
-        # mask_path shape: (T , E)
-        mask_path = (alphas * base_mask).requires_grad_(True)
+        alphas = torch.linspace(0.0, 1.0, T, device=self.device).view(-1, 1)  # (T,1)
+        mask_path_template = alphas * base_mask  # (T, E)
 
         # ------------------------------------------------------------------
-        # 2.  Prepare constant feature batches (x1, x2) replicated along path
+        # Process each sample pair
         # ------------------------------------------------------------------
-        x1, x2 = x1.to(self.device), x2.to(self.device)
-        x1_batch = x1.repeat(T, 1)  # (T , N_in)
-        x2_batch = x2.repeat(T, 1)  # (T , N_in)
+        all_ig = []
+        
+        for sample_idx in range(B):
+            x1i = x1[sample_idx:sample_idx+1]  # (1, N_in)
+            x2i = x2[sample_idx:sample_idx+1]  # (1, N_in)
+            
+            # Need fresh tensor for gradient computation
+            mask_path = mask_path_template.clone().requires_grad_(True)
 
-        # Concatenate so we can run them through the model in one call – this
-        # guarantees identical dropout/mask noise across the two inputs.
-        x_batch = torch.cat([x1_batch, x2_batch], dim=0)  # (2T , N_in)
+            # Prepare feature batches replicated along path
+            x1_batch = x1i.repeat(T, 1)  # (T , N_in)
+            x2_batch = x2i.repeat(T, 1)  # (T , N_in)
 
-        # Repeat masks for the two halves (x1 and x2)
-        mask_batch = mask_path.repeat(2, 1)  # (2T , E)
+            # Concatenate for single forward pass
+            x_batch = torch.cat([x1_batch, x2_batch], dim=0)  # (2T , N_in)
+            mask_batch = mask_path.repeat(2, 1)  # (2T , E)
+
+            # Forward pass
+            preds = self.model(x_batch, edge_mask=mask_batch)[:, target_idx]  # (2T , |T|)
+            preds = preds.sum(dim=1)  # (2T ,)
+
+            preds_x1 = preds[:T]
+            preds_x2 = preds[T:]
+
+            diff_abs = (preds_x1 - preds_x2).abs()  # (T ,)
+
+            # Back-propagate through mask_path
+            grads = torch.autograd.grad(diff_abs.sum(), mask_path)[0]  # (T , E)
+
+            # Trapezoidal rule over the path
+            trap = (grads[:-1] + grads[1:]) / 2.0  # (T-1 , E)
+            avg_grad = trap.mean(dim=0)            # (E ,)
+            ig_scores = avg_grad * base_mask.squeeze(0)  # multiply by Δmask (base_mask - 0)
+            
+            all_ig.append(ig_scores)
+        
+        all_ig = torch.stack(all_ig, dim=0)  # (B, E)
 
         # ------------------------------------------------------------------
-        # 3.  Forward pass and construct the **absolute** prediction difference
+        # Package results with reduction
         # ------------------------------------------------------------------
-        if isinstance(target_idx, int):
-            target_idx = [target_idx]
-
-        preds = self.model(x_batch, edge_mask=mask_batch)[:, target_idx]  # (2T , |T|)
-        preds = preds.sum(dim=1)  # (2T ,)
-
-        preds_x1 = preds[:T]
-        preds_x2 = preds[T:]
-
-        diff_abs = (preds_x1 - preds_x2).abs()  # (T ,)
-
-        # ------------------------------------------------------------------
-        # 4.  Back-propagate through mask_path
-        # ------------------------------------------------------------------
-        grads = torch.autograd.grad(diff_abs.sum(), mask_path)[0]  # (T , E)
-
-        # Trapezoidal rule over the path
-        trap = (grads[:-1] + grads[1:]) / 2.0  # (T-1 , E)
-        avg_grad = trap.mean(dim=0)            # (E ,)
-        ig_scores = avg_grad  # Δmask = 1, so multiply by 1
-
-        # 5.  Package as DataFrame ------------------------------------------------
         src, dst = np.array(self.model.homo_names)[self.model.edge_index.detach().cpu().numpy()]
+        
+        if reduction == 'none':
+            dfs = []
+            for i in range(B):
+                df = pd.DataFrame({
+                    "sample_idx": i,
+                    "source": src,
+                    "target": dst,
+                    "score": all_ig[i].detach().cpu().numpy(),
+                })
+                dfs.append(df)
+            return pd.concat(dfs, ignore_index=True)
+        elif reduction == 'sum':
+            scores_agg = all_ig.sum(dim=0)
+        else:  # mean
+            scores_agg = all_ig.mean(dim=0)
+        
         return pd.DataFrame({
             "source": src,
             "target": dst,
-            "score": ig_scores.detach().cpu().numpy(),
+            "score": scores_agg.detach().cpu().numpy(),
+        })
+
+    def _compute_node_attributions(
+        self,
+        x1: torch.Tensor,
+        x2: torch.Tensor,
+        target_idx: Union[int, List[int]],
+        jitter: Optional[torch.Tensor] = None,
+        reduction: str = 'mean',
+    ) -> pd.DataFrame:
+        """Compute node-level attributions for *f(x₁) − f(x₂)*."""
+        x1, x2 = x1.to(self.device), x2.to(self.device)
+        
+        # Ensure batch dimension
+        if x1.dim() == 1:
+            x1 = x1.unsqueeze(0)
+        if x2.dim() == 1:
+            x2 = x2.unsqueeze(0)
+        
+        B = x1.size(0)  # batch size
+        T = self.n_steps + 1  # number of points along the path (baseline included)
+        N = self.model.num_nodes
+        
+        if isinstance(target_idx, int):
+            target_idx = [target_idx]
+
+        # -------------------------------------------------------------
+        # Build base mask (optionally perturbed with jitter)
+        # -------------------------------------------------------------
+        base_mask = torch.ones((1, N), device=self.device)
+        if jitter is not None:
+            jitter = jitter.to(self.device)
+            if jitter.dim() == 1:
+                jitter = jitter.unsqueeze(0)
+            base_mask = torch.clamp(base_mask * (1.0 + jitter), 0.0, 1.0)
+
+        alphas = torch.linspace(0.0, 1.0, T, device=self.device).view(-1, 1)  # (T,1)
+        mask_path_template = alphas * base_mask  # (T, N)
+
+        # ------------------------------------------------------------------
+        # Process each sample pair
+        # ------------------------------------------------------------------
+        all_ig = []
+        
+        for sample_idx in range(B):
+            x1i = x1[sample_idx:sample_idx+1]  # (1, N_in)
+            x2i = x2[sample_idx:sample_idx+1]  # (1, N_in)
+            
+            # Need fresh tensor for gradient computation
+            mask_path = mask_path_template.clone().requires_grad_(True)
+
+            # Prepare feature batches replicated along path
+            x1_batch = x1i.repeat(T, 1)  # (T , N_in)
+            x2_batch = x2i.repeat(T, 1)  # (T , N_in)
+
+            # Concatenate for single forward pass
+            x_batch = torch.cat([x1_batch, x2_batch], dim=0)  # (2T , N_in)
+            mask_batch = mask_path.repeat(2, 1)  # (2T , N)
+
+            # Forward pass
+            preds = self.model(x_batch, node_mask=mask_batch)[:, target_idx]  # (2T , |T|)
+            preds = preds.sum(dim=1)  # (2T ,)
+
+            preds_x1 = preds[:T]
+            preds_x2 = preds[T:]
+
+            diff_abs = (preds_x1 - preds_x2).abs()  # (T ,)
+
+            # Back-propagate through mask_path
+            grads = torch.autograd.grad(diff_abs.sum(), mask_path)[0]  # (T , N)
+
+            # Trapezoidal rule over the path
+            trap = (grads[:-1] + grads[1:]) / 2.0  # (T-1 , N)
+            avg_grad = trap.mean(dim=0)            # (N ,)
+            ig_scores = avg_grad * base_mask.squeeze(0)  # multiply by Δmask (base_mask - 0)
+            
+            all_ig.append(ig_scores)
+        
+        all_ig = torch.stack(all_ig, dim=0)  # (B, N)
+
+        # ------------------------------------------------------------------
+        # Package results with reduction
+        # ------------------------------------------------------------------
+        node_names = np.array(self.model.homo_names)
+        
+        if reduction == 'none':
+            dfs = []
+            for i in range(B):
+                df = pd.DataFrame({
+                    "sample_idx": i,
+                    "node": node_names,
+                    "score": all_ig[i].detach().cpu().numpy(),
+                })
+                dfs.append(df)
+            return pd.concat(dfs, ignore_index=True)
+        elif reduction == 'sum':
+            scores_agg = all_ig.sum(dim=0)
+        else:  # mean
+            scores_agg = all_ig.mean(dim=0)
+        
+        return pd.DataFrame({
+            "node": node_names,
+            "score": scores_agg.detach().cpu().numpy(),
         }) 

@@ -113,7 +113,7 @@ class GSNNExplainer:
 
         self.model = model
 
-    def explain(self, x, targets=None, return_weights=False, target='edge'): 
+    def explain(self, x, target_idx=None, return_weights=False, target='edge'): 
         '''
         Initializes and runs gradient descent to select a minimal subset of edges or nodes that produce comparable predictions 
         to the full graph. 
@@ -140,9 +140,9 @@ class GSNNExplainer:
             raise ValueError(f"target must be 'edge' or 'node', got '{target}'")
 
         if target == 'edge':
-            return self._explain_edges(x, targets, return_weights)
+            return self._explain_edges(x, target_idx, return_weights)
         elif target == 'node':
-            return self._explain_nodes(x, targets, return_weights)
+            return self._explain_nodes(x, target_idx, return_weights)
 
     def _explain_edges(self, x, targets=None, return_weights=False):
         '''
@@ -207,7 +207,10 @@ class GSNNExplainer:
             optim.step() 
 
             with torch.no_grad():
-                r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), out.detach().cpu().numpy().ravel())
+                if out.view(-1).shape[0] == 1:
+                    r2 = -666 
+                else: 
+                    r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), out.detach().cpu().numpy().ravel())
 
             if self.verbose: 
                 print(f'iter: {iter} | loss: {loss.item():.4f} | mse: {mse.item():.4f} | r2: {r2:.3f} | active edges: {(edge_weight > 0.5).sum().item()} / {self.model.edge_index.size(1)} | entropy: {ent.item():.4f}', end='\r')
@@ -372,7 +375,7 @@ class GSNNExplainer:
         else:
             return nodedf
     
-    def tune(self, x, targets=None, min_r2=0.7, beta_step=1.5, max_trials=20, 
+    def tune(self, x, target_ixs=None, min_r2=0.7, beta_step=1.5, max_trials=20, 
              tolerance=1e-3, verbose=True, target='edge', **explain_kwargs):
         """
         Tune beta parameter starting from current value to find maximum sparsity while 
@@ -387,7 +390,7 @@ class GSNNExplainer:
         Args:
             x : torch.Tensor
                 Input data for explanation
-            targets : list, optional
+            target_ixs : list, optional
                 Target output indices to explain
             min_r2 : float, optional (default=0.7)
                 Minimum R² threshold to maintain
@@ -474,8 +477,8 @@ class GSNNExplainer:
                 # Get target predictions
                 with torch.no_grad():
                     target_preds = self.model(x)
-                    if targets is not None: 
-                        target_preds = target_preds[:, targets]
+                    if target_ixs is not None: 
+                        target_preds = target_preds[:, target_ixs]
                 
                 # Run training
                 for iter in range(self.iters):
@@ -483,8 +486,8 @@ class GSNNExplainer:
                     tau = max(self.tau0 * tau_decay_rate**iter, self.min_tau)
                     weight, _ = torch.nn.functional.gumbel_softmax(params, dim=0, hard=self.hard, tau=tau)
                     out = self.model(x, edge_mask=weight.view(1, -1))
-                    if targets is not None:
-                        out = out[:, targets]
+                    if target_ixs is not None:
+                        out = out[:, target_ixs]
                     
                     mse = crit(out, target_preds)
                     probs, _ = torch.nn.functional.softmax(params, dim=0)
@@ -505,8 +508,8 @@ class GSNNExplainer:
                     final_probs, _ = torch.nn.functional.softmax(params.data, dim=0)
                     subset_mask = (final_probs > 0.5).float()
                     subset_out = self.model(x, edge_mask=subset_mask.view(1, -1))
-                    if targets is not None:
-                        subset_out = subset_out[:, targets]
+                    if target_ixs is not None:
+                        subset_out = subset_out[:, target_ixs]
                     
                     subset_r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), 
                                        subset_out.detach().cpu().numpy().ravel())
@@ -527,8 +530,8 @@ class GSNNExplainer:
                 # Get target predictions
                 with torch.no_grad():
                     target_preds = self.model(x)
-                    if targets is not None: 
-                        target_preds = target_preds[:, targets]
+                    if target_ixs is not None: 
+                        target_preds = target_preds[:, target_ixs]
                 
                 # Run training
                 for iter in range(self.iters):
@@ -536,8 +539,8 @@ class GSNNExplainer:
                     tau = max(self.tau0 * tau_decay_rate**iter, self.min_tau)
                     weight, _ = torch.nn.functional.gumbel_softmax(params, dim=0, hard=self.hard, tau=tau)
                     out = self.model(x, node_mask=weight.view(1, -1))
-                    if targets is not None:
-                        out = out[:, targets]
+                    if target_ixs is not None:
+                        out = out[:, target_ixs]
                     
                     mse = crit(out, target_preds)
                     probs, _ = torch.nn.functional.softmax(params, dim=0)
@@ -558,8 +561,8 @@ class GSNNExplainer:
                     final_probs, _ = torch.nn.functional.softmax(params.data, dim=0)
                     subset_mask = (final_probs > 0.5).float()
                     subset_out = self.model(x, node_mask=subset_mask.view(1, -1))
-                    if targets is not None:
-                        subset_out = subset_out[:, targets]
+                    if target_ixs is not None:
+                        subset_out = subset_out[:, target_ixs]
                     
                     subset_r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), 
                                        subset_out.detach().cpu().numpy().ravel())
