@@ -50,6 +50,12 @@ class ContrastiveIGExplainer:
     in0    func0    0.42
     func0  func3    0.40
     func3  out0     0.38
+    
+    >>> # Compute IG for only a subset of edges
+    >>> edge_mask = np.array([True, False, True, False, True])  # Only integrate edges 0, 2, 4
+    >>> df = explainer.explain(x1, x2, target_idx=0, element_mask=edge_mask)
+    >>> # Edges 1 and 3 will have None scores; edges 0, 2, 4 have IG attributions
+    >>> # Note: Completeness axiom won't hold when using element_mask
     """
 
     def __init__(
@@ -83,6 +89,7 @@ class ContrastiveIGExplainer:
         target_idx: Union[int, List[int]],
         *,
         jitter: Optional[torch.Tensor] = None,
+        element_mask=None,
         target: str = 'edge',
         reduction: str = 'mean',
     ) -> pd.DataFrame:
@@ -98,6 +105,17 @@ class ContrastiveIGExplainer:
             attributions refer to the **sum** of those outputs.
         jitter : torch.Tensor, optional
             Optional noise to perturb the mask path.
+        element_mask : torch.Tensor or np.ndarray, optional (shape: [E] or [N])
+            Boolean mask indicating which elements to compute IG attributions for.
+            If None, all elements are integrated. If provided:
+            - True/nonzero elements: integrate from 0 to 1 (normal IG path)
+            - False/zero elements: fixed at 1 throughout the path (no integration)
+            Elements not in the mask will have None scores in the output.
+            
+            Note: When using element_mask, the completeness axiom (attributions sum
+            to |Δf|) will not hold since only a subset of elements are integrated.
+            The attributions measure "contribution to |Δf| while holding other 
+            elements fixed at full strength".
         target : str, optional (default='edge')
             Whether to return 'edge' or 'node' level attributions.
         reduction : str, optional (default='mean')
@@ -112,6 +130,7 @@ class ContrastiveIGExplainer:
             If target='edge': columns ['source', 'target', 'score'] for edge attributions.
             If target='node': columns ['node', 'score'] for node attributions.
             If reduction='none': additional 'sample_idx' column for batch dimension.
+            Elements not in element_mask will have None scores.
         """
         if target not in ['edge', 'node']:
             raise ValueError(f"target must be 'edge' or 'node', got '{target}'")
@@ -119,9 +138,9 @@ class ContrastiveIGExplainer:
             raise ValueError(f"reduction must be 'mean', 'sum', or 'none', got '{reduction}'")
 
         if target == 'edge':
-            return self._compute_edge_attributions(x1, x2, target_idx, jitter, reduction)
+            return self._compute_edge_attributions(x1, x2, target_idx, jitter, element_mask, reduction)
         else:
-            return self._compute_node_attributions(x1, x2, target_idx, jitter, reduction)
+            return self._compute_node_attributions(x1, x2, target_idx, jitter, element_mask, reduction)
 
     def _compute_edge_attributions(
         self,
@@ -129,6 +148,7 @@ class ContrastiveIGExplainer:
         x2: torch.Tensor,
         target_idx: Union[int, List[int]],
         jitter: Optional[torch.Tensor] = None,
+        element_mask=None,
         reduction: str = 'mean',
     ) -> pd.DataFrame:
         """Compute edge-level attributions for *f(x₁) − f(x₂)*."""
@@ -147,6 +167,18 @@ class ContrastiveIGExplainer:
             target_idx = [target_idx]
 
         # -------------------------------------------------------------
+        # Process element_mask
+        # -------------------------------------------------------------
+        if element_mask is not None:
+            if isinstance(element_mask, np.ndarray):
+                element_mask = torch.from_numpy(element_mask)
+            element_mask = element_mask.to(self.device).bool()
+            mask_float = element_mask.float().unsqueeze(0)  # (1, E)
+        else:
+            element_mask = None
+            mask_float = None
+
+        # -------------------------------------------------------------
         # Build base mask (optionally perturbed with jitter)
         # -------------------------------------------------------------
         base_mask = torch.ones((1, self.E), device=self.device)
@@ -157,7 +189,19 @@ class ContrastiveIGExplainer:
             base_mask = torch.clamp(base_mask * (1.0 + jitter), 0.0, 1.0)
 
         alphas = torch.linspace(0.0, 1.0, T, device=self.device).view(-1, 1)  # (T,1)
-        mask_path_template = alphas * base_mask  # (T, E)
+        
+        # -------------------------------------------------------------
+        # Build interpolated mask path
+        # -------------------------------------------------------------
+        # Standard interpolation from 0 to base_mask
+        interpolated = alphas * base_mask  # (T, E)
+        
+        if mask_float is not None:
+            # For masked edges (True): use interpolated values (0 -> base_mask)
+            # For unmasked edges (False): fix at 1.0 throughout
+            mask_path_template = mask_float * interpolated + (1.0 - mask_float) * 1.0
+        else:
+            mask_path_template = interpolated
 
         # ------------------------------------------------------------------
         # Process each sample pair
@@ -196,6 +240,10 @@ class ContrastiveIGExplainer:
             avg_grad = trap.mean(dim=0)            # (E ,)
             ig_scores = avg_grad * base_mask.squeeze(0)  # multiply by Δmask (base_mask - 0)
             
+            # Set unmasked edges to NaN
+            if element_mask is not None:
+                ig_scores = torch.where(element_mask, ig_scores, torch.tensor(float('nan'), device=self.device))
+            
             all_ig.append(ig_scores)
         
         all_ig = torch.stack(all_ig, dim=0)  # (B, E)
@@ -208,23 +256,30 @@ class ContrastiveIGExplainer:
         if reduction == 'none':
             dfs = []
             for i in range(B):
+                scores = all_ig[i].detach().cpu().numpy()
+                scores = [None if np.isnan(score) else score for score in scores]
                 df = pd.DataFrame({
                     "sample_idx": i,
                     "source": src,
                     "target": dst,
-                    "score": all_ig[i].detach().cpu().numpy(),
+                    "score": scores,
                 })
                 dfs.append(df)
             return pd.concat(dfs, ignore_index=True)
         elif reduction == 'sum':
-            scores_agg = all_ig.sum(dim=0)
+            scores_agg = torch.nansum(all_ig, dim=0) if element_mask is not None else all_ig.sum(dim=0)
         else:  # mean
-            scores_agg = all_ig.mean(dim=0)
+            scores_agg = torch.nanmean(all_ig, dim=0) if element_mask is not None else all_ig.mean(dim=0)
+        
+        # Convert NaN to None for edges not in mask
+        scores = scores_agg.detach().cpu().numpy()
+        if element_mask is not None:
+            scores = [None if np.isnan(score) else score for score in scores]
         
         return pd.DataFrame({
             "source": src,
             "target": dst,
-            "score": scores_agg.detach().cpu().numpy(),
+            "score": scores,
         })
 
     def _compute_node_attributions(
@@ -233,6 +288,7 @@ class ContrastiveIGExplainer:
         x2: torch.Tensor,
         target_idx: Union[int, List[int]],
         jitter: Optional[torch.Tensor] = None,
+        element_mask=None,
         reduction: str = 'mean',
     ) -> pd.DataFrame:
         """Compute node-level attributions for *f(x₁) − f(x₂)*."""
@@ -252,6 +308,18 @@ class ContrastiveIGExplainer:
             target_idx = [target_idx]
 
         # -------------------------------------------------------------
+        # Process element_mask
+        # -------------------------------------------------------------
+        if element_mask is not None:
+            if isinstance(element_mask, np.ndarray):
+                element_mask = torch.from_numpy(element_mask)
+            element_mask = element_mask.to(self.device).bool()
+            mask_float = element_mask.float().unsqueeze(0)  # (1, N)
+        else:
+            element_mask = None
+            mask_float = None
+
+        # -------------------------------------------------------------
         # Build base mask (optionally perturbed with jitter)
         # -------------------------------------------------------------
         base_mask = torch.ones((1, N), device=self.device)
@@ -262,7 +330,19 @@ class ContrastiveIGExplainer:
             base_mask = torch.clamp(base_mask * (1.0 + jitter), 0.0, 1.0)
 
         alphas = torch.linspace(0.0, 1.0, T, device=self.device).view(-1, 1)  # (T,1)
-        mask_path_template = alphas * base_mask  # (T, N)
+        
+        # -------------------------------------------------------------
+        # Build interpolated mask path
+        # -------------------------------------------------------------
+        # Standard interpolation from 0 to base_mask
+        interpolated = alphas * base_mask  # (T, N)
+        
+        if mask_float is not None:
+            # For masked nodes (True): use interpolated values (0 -> base_mask)
+            # For unmasked nodes (False): fix at 1.0 throughout
+            mask_path_template = mask_float * interpolated + (1.0 - mask_float) * 1.0
+        else:
+            mask_path_template = interpolated
 
         # ------------------------------------------------------------------
         # Process each sample pair
@@ -301,6 +381,10 @@ class ContrastiveIGExplainer:
             avg_grad = trap.mean(dim=0)            # (N ,)
             ig_scores = avg_grad * base_mask.squeeze(0)  # multiply by Δmask (base_mask - 0)
             
+            # Set unmasked nodes to NaN
+            if element_mask is not None:
+                ig_scores = torch.where(element_mask, ig_scores, torch.tensor(float('nan'), device=self.device))
+            
             all_ig.append(ig_scores)
         
         all_ig = torch.stack(all_ig, dim=0)  # (B, N)
@@ -313,19 +397,26 @@ class ContrastiveIGExplainer:
         if reduction == 'none':
             dfs = []
             for i in range(B):
+                scores = all_ig[i].detach().cpu().numpy()
+                scores = [None if np.isnan(score) else score for score in scores]
                 df = pd.DataFrame({
                     "sample_idx": i,
                     "node": node_names,
-                    "score": all_ig[i].detach().cpu().numpy(),
+                    "score": scores,
                 })
                 dfs.append(df)
             return pd.concat(dfs, ignore_index=True)
         elif reduction == 'sum':
-            scores_agg = all_ig.sum(dim=0)
+            scores_agg = torch.nansum(all_ig, dim=0) if element_mask is not None else all_ig.sum(dim=0)
         else:  # mean
-            scores_agg = all_ig.mean(dim=0)
+            scores_agg = torch.nanmean(all_ig, dim=0) if element_mask is not None else all_ig.mean(dim=0)
+        
+        # Convert NaN to None for nodes not in mask
+        scores = scores_agg.detach().cpu().numpy()
+        if element_mask is not None:
+            scores = [None if np.isnan(score) else score for score in scores]
         
         return pd.DataFrame({
             "node": node_names,
-            "score": scores_agg.detach().cpu().numpy(),
+            "score": scores,
         }) 

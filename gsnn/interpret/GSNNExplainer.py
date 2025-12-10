@@ -69,7 +69,7 @@ class GSNNExplainer:
     """
 
     def __init__(self, model, data, ignore_cuda=False, gumbel_softmax=True, hard=False, tau0=3, min_tau=0.5, 
-                            prior=1, iters=250, lr=1e-2, weight_decay=1e-5, free_edges=0,
+                            prior=1, iters=250, lr=1e-2, weight_decay=1e-5, free_edges=0, grad_norm_clip=0,
                                     beta=1, verbose=True, optimizer=torch.optim.Adam, entropy=0): 
         '''
         Adapted from the methods presented in `GNNExplainer` (https://arxiv.org/abs/1903.03894). 
@@ -83,6 +83,14 @@ class GSNNExplainer:
             tau0            float                       initial temperature value for gumbel-softmax 
             min_tau         float                       minimum temperature value for gumbel-softmax 
             prior           float                       prior strength to initialize theta; value of 0 will make each element 0.5 prob of being selecting, value > 0 will make it more likely to be selected. 
+            grad_norm_clip  float                       gradient norm clipping value
+            verbose         bool                        whether to print progress information during optimisation
+            optimizer       torch.optim.Optimizer       optimizer to use for training
+            entropy         float                       entropy bonus strength
+            iters           int                         number of optimisation steps
+            lr              float                       learning rate for the optimiser
+            weight_decay    float                       weight decay for the optimiser
+            free_edges      int                         number of edges allowed before the sparsity penalty activates
 
         Returns 
             None 
@@ -99,6 +107,7 @@ class GSNNExplainer:
         self.hard = hard
         self.min_tau = min_tau
         self.tau0 = tau0
+        self.grad_norm_clip = grad_norm_clip
         self.data = data
         self.device = 'cuda' if (torch.cuda.is_available() and not ignore_cuda) else 'cpu'
         self.entropy = entropy
@@ -178,6 +187,7 @@ class GSNNExplainer:
         # get target predictions 
         with torch.no_grad():
             target_preds = self.model(x)
+
         if targets is not None: 
             target_preds = target_preds[:, targets]
 
@@ -204,6 +214,10 @@ class GSNNExplainer:
                 - self.entropy*ent
 
             loss.backward() 
+
+            if self.grad_norm_clip > 0:
+                torch.nn.utils.clip_grad_norm_(edge_params.grad, self.grad_norm_clip)
+
             optim.step() 
 
             with torch.no_grad():

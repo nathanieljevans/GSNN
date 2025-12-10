@@ -142,8 +142,6 @@ class OcclusionExplainer:
         x = x.to(self.device)
         if x.dim() == 1:
             x = x.unsqueeze(0)  # Ensure batch dimension
-        
-        B = x.size(0)  # batch size
 
         # ------------------------------------------------------------------
         # 1. Process element_mask
@@ -157,46 +155,47 @@ class OcclusionExplainer:
             edges_to_occlude = torch.arange(self.E, device=self.device)
 
         # ------------------------------------------------------------------
-        # 2. Process each sample
+        # 2. Compute occlusion scores (batched across all samples)
         # ------------------------------------------------------------------
-        all_scores = []
+        # Compute baseline prediction (all edges present)
+        baseline_pred = self.model(x)[:, target_idx].detach()  # (B,)
+
+        B = x.size(0)  # batch size
+
+        # Initialize scores with NaN for edges not being occluded
+        occlusion_scores = torch.full((B, self.E), float('nan'), device=self.device)
         
-        for sample_idx in range(B):
-            xi = x[sample_idx:sample_idx+1]  # (1, N_in)
-            
-            # Compute baseline prediction (all edges present)
-            baseline_mask = torch.ones((1, self.E), device=self.device)
-            baseline_pred = self.model(xi, edge_mask=baseline_mask)[:, target_idx].item()
+        if len(edges_to_occlude) > 0:
+            for start_idx in range(0, len(edges_to_occlude), self.batch_size):
+                end_idx = min(start_idx + self.batch_size, len(edges_to_occlude))
+                BB = end_idx - start_idx  # edge occlusion batch size
+                
+                # Create batch of masks with one edge removed per mask
+                batch_masks = torch.ones((BB, self.E), device=self.device)
 
-            # Compute occlusion scores in batches
-            occlusion_scores = torch.full((self.E,), float('nan'), device=self.device)
-            
-            if len(edges_to_occlude) > 0:
-                for start_idx in range(0, len(edges_to_occlude), self.batch_size):
-                    end_idx = min(start_idx + self.batch_size, len(edges_to_occlude))
-                    batch_size_actual = end_idx - start_idx
-                    
-                    # Create batch of masks with one edge removed per mask
-                    batch_masks = torch.ones((batch_size_actual, self.E), device=self.device)
-                    batch_edge_indices = edges_to_occlude[start_idx:end_idx]
-                    
-                    for i, edge_idx in enumerate(batch_edge_indices):
-                        batch_masks[i, edge_idx] = 0.0
+                batch_edge_indices = edges_to_occlude[start_idx:end_idx]
 
-                    # Replicate input for batch processing
-                    x_batch = xi.repeat(batch_size_actual, 1)
+                # Vectorized mask creation
+                batch_masks[torch.arange(BB, device=self.device), batch_edge_indices] = 0.0
 
-                    # Forward pass
-                    preds = self.model(x_batch, edge_mask=batch_masks)[:, target_idx]
-                    
-                    # Compute occlusion effects
-                    batch_scores = baseline_pred - preds
-                    occlusion_scores[batch_edge_indices] = batch_scores
-            
-            all_scores.append(occlusion_scores)
-        
-        all_scores = torch.stack(all_scores, dim=0)  # (B, E)
+                # Replicate input for batch processing: (B, N_in) -> (BB*B, N_in)
+                x_batch = x.unsqueeze(0).repeat(BB, 1, 1)  # (BB, B, N_in)
+                x_batch = x_batch.view(-1, x.size(1))  # (BB*B, N_in)
 
+                # Expand masks for all samples: (BB, E) -> (BB*B, E)
+                batch_masks_expanded = batch_masks.unsqueeze(1).repeat(1, B, 1)  # (BB, B, E)
+                batch_masks_expanded = batch_masks_expanded.view(-1, self.E)  # (BB*B, E)
+
+                # Forward pass
+                preds = self.model(x_batch, edge_mask=batch_masks_expanded)[:, target_idx]  # (BB*B,)
+                preds = preds.view(BB, B)  # (BB, B)
+
+                # Compute occlusion effects: baseline - occluded
+                # baseline_pred is (B,), broadcasts to (BB, B)
+                batch_scores = baseline_pred.unsqueeze(0) - preds  # (BB, B)
+                
+                # Store scores: transpose to (B, BB) for proper column assignment
+                occlusion_scores[:, batch_edge_indices] = batch_scores.T
         # ------------------------------------------------------------------
         # 3. Package results with reduction
         # ------------------------------------------------------------------
@@ -206,7 +205,7 @@ class OcclusionExplainer:
             # Return per-sample attributions
             dfs = []
             for i in range(B):
-                scores = all_scores[i].detach().cpu().numpy()
+                scores = occlusion_scores[i].detach().cpu().numpy()
                 scores = [None if np.isnan(score) else score for score in scores]
                 df = pd.DataFrame({
                     'sample_idx': i,
@@ -219,9 +218,9 @@ class OcclusionExplainer:
         
         # For mean/sum, handle NaN values properly
         if reduction == 'sum':
-            scores_agg = torch.nansum(all_scores, dim=0)
+            scores_agg = torch.nansum(occlusion_scores, dim=0)
         else:  # mean
-            scores_agg = torch.nanmean(all_scores, dim=0)
+            scores_agg = torch.nanmean(occlusion_scores, dim=0)
         
         # Convert NaN to None for edges not in mask
         scores = scores_agg.detach().cpu().numpy()
@@ -273,45 +272,44 @@ class OcclusionExplainer:
             nodes_to_occlude = torch.arange(self.N, device=self.device)
 
         # ------------------------------------------------------------------
-        # 2. Process each sample
+        # 2. Compute occlusion scores (batched across all samples)
         # ------------------------------------------------------------------
-        all_scores = []
+        # Compute baseline prediction (all nodes present)
+        baseline_pred = self.model(x)[:, target_idx].detach()  # (B,)
+
+        # Initialize scores with NaN for nodes not being occluded
+        occlusion_scores = torch.full((B, self.N), float('nan'), device=self.device)
         
-        for sample_idx in range(B):
-            xi = x[sample_idx:sample_idx+1]  # (1, N_in)
-            
-            # Compute baseline prediction (all nodes present)
-            baseline_mask = torch.ones((1, self.N), device=self.device)
-            baseline_pred = self.model(xi, node_mask=baseline_mask)[:, target_idx].item()
+        if len(nodes_to_occlude) > 0:
+            for start_idx in range(0, len(nodes_to_occlude), self.batch_size):
+                end_idx = min(start_idx + self.batch_size, len(nodes_to_occlude))
+                NN = end_idx - start_idx  # node occlusion batch size
+                
+                # Create batch of masks with one node removed per mask
+                batch_masks = torch.ones((NN, self.N), device=self.device)
+                batch_node_indices = nodes_to_occlude[start_idx:end_idx]
+                
+                # Vectorized mask creation
+                batch_masks[torch.arange(NN, device=self.device), batch_node_indices] = 0.0
 
-            # Compute occlusion scores in batches
-            occlusion_scores = torch.full((self.N,), float('nan'), device=self.device)
-            
-            if len(nodes_to_occlude) > 0:
-                for start_idx in range(0, len(nodes_to_occlude), self.batch_size):
-                    end_idx = min(start_idx + self.batch_size, len(nodes_to_occlude))
-                    batch_size_actual = end_idx - start_idx
-                    
-                    # Create batch of masks with one node removed per mask
-                    batch_masks = torch.ones((batch_size_actual, self.N), device=self.device)
-                    batch_node_indices = nodes_to_occlude[start_idx:end_idx]
-                    
-                    for i, node_idx in enumerate(batch_node_indices):
-                        batch_masks[i, node_idx] = 0.0
+                # Replicate input for batch processing: (B, N_in) -> (NN*B, N_in)
+                x_batch = x.unsqueeze(0).repeat(NN, 1, 1)  # (NN, B, N_in)
+                x_batch = x_batch.view(-1, x.size(1))  # (NN*B, N_in)
+                
+                # Expand masks for all samples: (NN, N) -> (NN*B, N)
+                batch_masks_expanded = batch_masks.unsqueeze(1).repeat(1, B, 1)  # (NN, B, N)
+                batch_masks_expanded = batch_masks_expanded.view(-1, self.N)  # (NN*B, N)
 
-                    # Replicate input for batch processing
-                    x_batch = xi.repeat(batch_size_actual, 1)
-
-                    # Forward pass
-                    preds = self.model(x_batch, node_mask=batch_masks)[:, target_idx]
-                    
-                    # Compute occlusion effects
-                    batch_scores = baseline_pred - preds
-                    occlusion_scores[batch_node_indices] = batch_scores
-            
-            all_scores.append(occlusion_scores)
-        
-        all_scores = torch.stack(all_scores, dim=0)  # (B, N)
+                # Forward pass
+                preds = self.model(x_batch, node_mask=batch_masks_expanded)[:, target_idx]  # (NN*B,)
+                preds = preds.view(NN, B)  # (NN, B)
+                
+                # Compute occlusion effects: baseline - occluded
+                # baseline_pred is (B,), broadcasts to (NN, B)
+                batch_scores = baseline_pred.unsqueeze(0) - preds  # (NN, B)
+                
+                # Store scores: transpose to (B, NN) for proper column assignment
+                occlusion_scores[:, batch_node_indices] = batch_scores.T
 
         # ------------------------------------------------------------------
         # 3. Package results with reduction
@@ -322,7 +320,7 @@ class OcclusionExplainer:
             # Return per-sample attributions
             dfs = []
             for i in range(B):
-                scores = all_scores[i].detach().cpu().numpy()
+                scores = occlusion_scores[i].detach().cpu().numpy()
                 scores = [None if np.isnan(score) else score for score in scores]
                 df = pd.DataFrame({
                     'sample_idx': i,
@@ -334,9 +332,9 @@ class OcclusionExplainer:
         
         # For mean/sum, handle NaN values properly
         if reduction == 'sum':
-            scores_agg = torch.nansum(all_scores, dim=0)
+            scores_agg = torch.nansum(occlusion_scores, dim=0)
         else:  # mean
-            scores_agg = torch.nanmean(all_scores, dim=0)
+            scores_agg = torch.nanmean(occlusion_scores, dim=0)
         
         # Convert NaN to None for nodes not in mask
         scores = scores_agg.detach().cpu().numpy()
