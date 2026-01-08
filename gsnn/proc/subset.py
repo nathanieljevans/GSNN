@@ -35,12 +35,8 @@ def bfs_distance(G, start_node, depth, node_names):
     while queue:
         current_node, current_depth = queue.popleft()
 
-        # If we have reached the maximum depth, skip further exploration
-        if current_depth > depth:
-            continue
-
         for neighbor in G.successors(current_node):
-            if neighbor not in distances:
+            if neighbor not in distances and current_depth + 1 <= depth:
                 distances[neighbor] = current_depth + 1
                 queue.append((neighbor, current_depth + 1))
 

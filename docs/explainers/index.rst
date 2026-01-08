@@ -4,7 +4,7 @@ Explainers
 The GSNN library provides a comprehensive suite of explainability methods designed to interpret predictions from Graph Structured Neural Networks. These methods help researchers understand *which edges contribute to predictions*, *how perturbations affect outcomes*, and *what minimal changes would lead to different results*. Each explainer is tailored to different types of questions and provides unique insights into model behavior.
 
 .. note::
-    Unlike traditional neural network explainers that focus on input features, GSNN explainers operate on the **edge space** of the graph. This allows direct interpretation of how specific molecular interactions or pathway connections contribute to predictions.
+    Unlike traditional neural network explainers that focus on input features, GSNN explainers operate on the **edge space** or **node space** of the graph. This allows direct interpretation of how specific molecular interactions or pathway connections contribute to predictions. Many explainers support both edge-level (``target='edge'``) and node-level (``target='node'``) attributions.
 
 Edge Attribution Methods
 ------------------------
@@ -23,35 +23,55 @@ The Integrated Gradients explainer computes per-edge attributions by integrating
   * When baseline comparisons are meaningful (e.g., comparing to "no activity" state)
   * For generating faithful attributions with theoretical guarantees
 
+*Batch processing:*
+  The explainer supports multiple observations via the ``reduction`` parameter:
+  
+  * ``reduction='mean'`` — average attributions across all samples
+  * ``reduction='sum'`` — sum attributions across all samples  
+  * ``reduction='none'`` — return attributions for each sample separately
+
 *Strengths:*
   * Mathematically principled with completeness guarantees
   * Relatively stable across different baseline choices
   * Computationally efficient for single predictions
+  * Supports batch processing for multiple observations
 
 *Weaknesses:*
   * Requires careful baseline selection
   * May struggle with highly nonlinear interactions
-  * Limited to single-input explanations
 
 
 **Contrastive Integrated Gradients Explainer**
 
-The Contrastive IG explainer extends Integrated Gradients to **contrastive questions** by attributing the prediction difference Δf = f(x₁) - f(x₂) to individual edges. This method integrates along mask paths while keeping both inputs fixed, making it ideal for understanding why the model predicts differently for two related observations.
+The Contrastive IG explainer extends Integrated Gradients to **contrastive questions** by attributing the prediction difference Δf = f(x₁) - f(x₂) to individual edges or nodes. This method integrates along mask paths while keeping both inputs fixed, making it ideal for understanding why the model predicts differently for two related observations.
 
 *What the results indicate:*
-  * **Positive scores** indicate edges that increase the absolute prediction difference |Δf|
-  * **Negative scores** indicate edges that decrease the absolute prediction difference
-  * **Near-zero scores** indicate edges irrelevant to the contrast
+  * **Positive scores** indicate elements that increase the absolute prediction difference |Δf|
+  * **Negative scores** indicate elements that decrease the absolute prediction difference
+  * **Near-zero scores** indicate elements irrelevant to the contrast
+
+*Attribution targets:*
+  * ``target='edge'`` — attribute to individual edges (default)
+  * ``target='node'`` — attribute to individual nodes
 
 *When to use:*
   * Comparing predictions between related samples (e.g., diseased vs. healthy)
   * Understanding differential pathway activation
   * When interested in *relative* rather than absolute importance
 
+*Batch processing:*
+  The explainer supports multiple observation pairs via the ``reduction`` parameter:
+  
+  * ``reduction='mean'`` — average attributions across all pairs
+  * ``reduction='sum'`` — sum attributions across all pairs  
+  * ``reduction='none'`` — return attributions for each pair separately
+
 *Strengths:*
   * Principled approach to contrastive explanations
   * Maintains completeness axiom for prediction differences
   * Excellent for comparative analysis
+  * Supports both edge and node level attributions
+  * Supports batch processing for multiple observation pairs
 
 *Weaknesses:*
   * Requires paired observations for meaningful interpretation
@@ -77,11 +97,19 @@ The Occlusion explainer provides a direct, model-agnostic measure of edge import
   * When computational budget allows exhaustive perturbation testing
   * For non-differentiable models or when gradients are unreliable
 
+*Batch processing:*
+  The explainer supports multiple observations via the ``reduction`` parameter:
+  
+  * ``reduction='mean'`` — average attributions across all samples
+  * ``reduction='sum'`` — sum attributions across all samples  
+  * ``reduction='none'`` — return attributions for each sample separately
+
 *Strengths:*
   * Intuitive and direct interpretation
   * Model-agnostic (works with any architecture)
   * Provides clear causal insights
   * No baseline selection required
+  * Supports batch processing for multiple observations
 
 *Weaknesses:*
   * Computationally expensive (scales linearly with number of edges)
@@ -91,25 +119,42 @@ The Occlusion explainer provides a direct, model-agnostic measure of edge import
 
 **Contrastive Occlusion Explainer**
 
-The Contrastive Occlusion explainer extends the occlusion approach to contrastive scenarios by measuring how edge removal affects the absolute prediction difference between two inputs. This method identifies edges that specifically contribute to differential predictions.
+The Contrastive Occlusion explainer extends the occlusion approach to contrastive scenarios by measuring how edge or node removal affects the absolute prediction difference between two inputs. This method identifies elements that specifically contribute to differential predictions.
 
 *What the results indicate:*
-  * **Positive scores** indicate edges whose removal decreases |Δf| (edge contributes to difference)
-  * **Negative scores** indicate edges whose removal increases |Δf| (edge reduces difference)
-  * **Near-zero scores** indicate edges with no impact on the prediction difference
+  * **Positive scores** indicate elements whose removal decreases |Δf| (element contributes to difference)
+  * **Negative scores** indicate elements whose removal increases |Δf| (element reduces difference)
+  * **Near-zero scores** indicate elements with no impact on the prediction difference
+
+*Attribution targets:*
+  * ``target='edge'`` — attribute to individual edges (default)
+  * ``target='node'`` — attribute to individual nodes
 
 *When to use:*
   * Identifying pathway differences between conditions
   * Understanding mechanism-specific effects
   * When gradient-based contrastive methods are not applicable
 
+*Batch processing:*
+  The explainer supports multiple observation pairs via the ``reduction`` parameter:
+  
+  * ``reduction='mean'`` — average attributions across all pairs
+  * ``reduction='sum'`` — sum attributions across all pairs  
+  * ``reduction='none'`` — return attributions for each pair separately
+
+*Element masking:*
+  Use the ``element_mask`` parameter to restrict occlusion to a subset of edges or nodes,
+  which can significantly reduce computation time when only certain elements are of interest.
+
 *Strengths:*
   * Direct measurement of differential importance
   * Model-agnostic approach
   * Clear interpretation for comparative studies
+  * Supports both edge and node level attributions
+  * Supports batch processing and element masking
 
 *Weaknesses:*
-  * Computationally intensive (quadratic in number of comparisons)
+  * Computationally intensive (scales with number of elements)
   * Limited to pairwise comparisons
   * May miss subtle interaction effects
 
@@ -143,6 +188,46 @@ The GSNN explainer learns a sparse binary edge mask that maximizes fidelity to t
   * May converge to local optima
   * Computational overhead for iterative optimization
   * Binary masks may miss nuanced importance gradients
+
+
+**Contrastive GSNN Explainer**
+
+The Contrastive GSNN explainer learns a sparse binary mask (edge or node level) that maximizes fidelity to the **prediction difference** Δf = f(x₁) - f(x₂) while minimizing the number of active elements. This method identifies the minimal set of elements necessary to reproduce the differential prediction between two inputs.
+
+When given multiple input pairs (batch), the explainer learns a **single mask** that works well across all pairs simultaneously by treating the differences as a multivariate MSE objective. This is much more efficient than per-sample optimization.
+
+*What the results indicate:*
+  * **Scores near 1** indicate elements essential for reproducing the prediction difference
+  * **Scores near 0** indicate elements that can be removed without affecting the difference
+  * The overall mask reveals the **minimal contrastive subgraph**
+
+*Attribution targets:*
+  * ``target='edge'`` — learn edge-level mask (default)
+  * ``target='node'`` — learn node-level mask
+
+*When to use:*
+  * Identifying edges/nodes that drive differential predictions between conditions
+  * When sparse contrastive explanations are needed
+  * Understanding which pathway components are responsible for prediction differences
+  * Comparing multiple pairs efficiently with a single mask
+
+*Hyperparameter tuning:*
+  The ``tune()`` method automatically finds the optimal ``beta`` parameter to balance
+  sparsity and fidelity. It searches for the maximum sparsity while maintaining a
+  minimum fidelity threshold (default 0.9).
+
+*Strengths:*
+  * Produces sparse contrastive explanations
+  * Efficient batch processing with shared mask optimization
+  * Supports both edge and node level attributions
+  * Automatic hyperparameter tuning via ``tune()`` method
+  * Multivariate MSE objective preserves sign and target dimensions
+
+*Weaknesses:*
+  * Requires paired observations
+  * May converge to local optima
+  * Hyperparameter sensitivity (beta, learning rate)
+  * Single mask may not capture sample-specific differences
 
 
 **Counterfactual Explainer**
@@ -217,6 +302,11 @@ Choosing the Right Explainer
 **For Comparative Analysis:**
   * Use **Contrastive IG Explainer** for principled differential attribution
   * Use **Contrastive Occlusion Explainer** for model-agnostic comparative analysis
+  * Use **Contrastive GSNN Explainer** when you need sparse contrastive explanations
+
+**For Batch Processing:**
+  * All explainers support batch processing via the ``reduction`` parameter
+  * **Contrastive GSNN Explainer** is particularly efficient for batches (learns single shared mask)
 
 **For Robust Explanations:**
   * Wrap gradient-based methods with **Noise Tunnel** for stability
@@ -224,7 +314,7 @@ Choosing the Right Explainer
 
 **Computational Considerations:**
   * **Fastest:** IG Explainer
-  * **Moderate:** GSNN Explainer
+  * **Moderate:** GSNN Explainer, Contrastive GSNN Explainer (batch)
   * **Slowest:** Occlusion-based methods (scale with graph size)
 
 .. note::

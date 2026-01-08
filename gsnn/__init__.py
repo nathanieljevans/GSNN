@@ -16,6 +16,7 @@ __all__ = [
     "simulate",
     "interpret",
     "optim",
+    "proc",
 ]
 
 for _mod in __all__:
