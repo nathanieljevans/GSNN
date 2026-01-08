@@ -5,4 +5,7 @@ setup(
     version='0.2',
     packages=find_packages(where='.'),
     package_dir={'': '.'},
+    extras_require={
+        'bio': ['omnipath', 'pypath-omnipath'],
+    },
 )
