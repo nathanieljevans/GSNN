@@ -1,8 +1,7 @@
 # Graph Structured Neural Networks (GSNN)
 
 [![DOI](https://zenodo.org/badge/661415998.svg)](https://doi.org/10.5281/zenodo.18809080)
-
-[![RTD](https://app.readthedocs.org/projects/gsnn/badge/?version=latest)
+![RTD](https://app.readthedocs.org/projects/gsnn/badge/?version=latest)
 
 ## Overview 
 
