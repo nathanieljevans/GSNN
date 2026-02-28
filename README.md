@@ -1,8 +1,16 @@
 # Graph Structured Neural Networks (GSNN)
 
+[![DOI](https://zenodo.org/badge/661415998.svg)](https://doi.org/10.5281/zenodo.18809080)
+
+[![RTD](https://app.readthedocs.org/projects/gsnn/badge/?version=latest)
+
 ## Overview 
 
-The GSNN method is a algorithm that integrates prior knowledge of latent variable interactions directly into neural architecture.
+The GSNN method is a algorithm that integrates prior knowledge of latent variable interactions directly into neural architecture. See the [read-the-docs](https://gsnn.readthedocs.io/en/latest/) for documentation. 
+
+## Citation 
+
+Please cite the DOI listed above or the pre-print below:   
 
 ```
 @article {Evans2024.02.28.582164,
@@ -18,14 +26,4 @@ The GSNN method is a algorithm that integrates prior knowledge of latent variabl
 }
 ```
 
-The figures and analysis presented in the preprint can be run using the code available from this [release](https://github.com/nathanieljevans/GSNN/releases/tag/v1.0.0). We have since migrated much of the analysis for the GSNN paper to this auxillary [library](https://github.com/nathanieljevans/gsnn-lib).
-
-## Getting Started
-
-Create the `conda/mamba` python environment and install the GSNN package: 
-```bash 
-$ mamba env create -f environment.yml 
-$ conda activate gsnn 
-(gsnn) $ pip install -e .
-```
-
+Please note that the figures and analysis presented in the preprint can be run using the code available from this [release v1.0.0](https://github.com/nathanieljevans/GSNN/releases/tag/v1.0.0). We have since migrated much of the bio-specific analysis for the GSNN pre-print paper to this auxillary [library](https://github.com/nathanieljevans/gsnn-lib).
