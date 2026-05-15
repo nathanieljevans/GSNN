@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
 import numpy as np
 
-def plot_edge_importance(res, pos=None, cmap=plt.cm.coolwarm, title='', figsize=(4,3), roots=None, leafs=None, interactive=False): 
+def plot_edge_importance(res, pos=None, cmap=plt.cm.coolwarm, title='', figsize=(4,3), roots=None, leafs=None, interactive=False, save=None, dpi=300, colorbar_label='Edge Importance'): 
 
     if interactive:
         try:
@@ -245,7 +245,7 @@ def plot_edge_importance(res, pos=None, cmap=plt.cm.coolwarm, title='', figsize=
         #nx.draw_networkx_edge_labels(G, pos, font_size=6, edge_labels=edge_labels)
 
         # add colorbar centered at 0 (white = 0, red = positive, blue = negative)
-        plt.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), ax=plt.gca(), label='Edge Importance')
+        cb = plt.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), ax=plt.gca())
         plt.tight_layout() 
         plt.title(title) 
 
@@ -253,6 +253,11 @@ def plot_edge_importance(res, pos=None, cmap=plt.cm.coolwarm, title='', figsize=
         plt.gca().spines['right'].set_visible(False)
         plt.gca().spines['bottom'].set_visible(False)
         plt.gca().spines['left'].set_visible(False)
+
+        cb.set_label(colorbar_label, fontsize=20)
+
+        if save is not None:
+            plt.savefig(save, bbox_inches='tight', pad_inches=0., dpi=dpi)
 
         plt.show()
 
