@@ -453,7 +453,7 @@ class NodeAttention(torch.nn.Module):
     def __init__(self, channel_groups, 
                  dropout: float = 0.0, 
                  temperature: float = 1.0, 
-                 channels=128,
+                 channels=16,
                  edge_index=None,
                  edge_weight=None):
         super().__init__()
@@ -551,8 +551,8 @@ class NodeMLP(nn.Module):
 class ResBlock(torch.nn.Module): 
 
     def __init__(self, bias, nonlin, indices_params, dropout=0., norm='layer', init='xavier', 
-                 lin_in=None, lin_out=None, residual=True, norm_first=True, node_attn=False, 
-                 learn_residual=True, affine=True, node_mlp=True, node_mlp_hidden=256, 
+                 lin_in=None, lin_out=None, residual=True, norm_first=True, node_attn=False, attn_mlp_hidden=32,
+                 learn_residual=True, affine=True, node_mlp=True, node_mlp_hidden=32, 
                  edge_index=None, edge_weight=None): 
         r"""A residual block for GSNN that applies sparse linear transformations with optional normalization.
 
@@ -620,7 +620,7 @@ class ResBlock(torch.nn.Module):
         self.norm_first = norm_first
         self.norm = norm
         self.dropout = dropout
-        self.node_attn = NodeAttention(channel_groups, edge_index=edge_index, edge_weight=edge_weight) if node_attn else None 
+        self.node_attn = NodeAttention(channel_groups, channels=attn_mlp_hidden, edge_index=edge_index, edge_weight=edge_weight) if node_attn else None 
         self.register_buffer('channel_groups', torch.tensor(channel_groups, dtype=torch.long))
         self.n_nodes = int(self.channel_groups.max().item() + 1)
         self.channels_per_node = int(self.channel_groups.numel() // self.n_nodes)
@@ -785,8 +785,8 @@ class GSNN(torch.nn.Module):
 
     def __init__(self, edge_index_dict, node_names_dict, channels, layers, dropout=0., nonlin=torch.nn.ELU, bias=True, 
                  share_layers=True, add_function_self_edges=True, norm='layer', init='degree_normalized', verbose=False, 
-                 edge_channels=1, checkpoint=False, residual=True, norm_first=True, node_attn=False, 
-                 node_mlp=True, node_mlp_hidden=128, edge_weight_dict=None):
+                 edge_channels=1, checkpoint=False, residual=True, norm_first=True, node_attn=False, attn_mlp_hidden=16,
+                 node_mlp=True, node_mlp_hidden=16, edge_weight_dict=None):
         r"""Graph Structured Neural Network (GSNN) that constrains neural network architecture using a predefined graph structure.
         Unlike traditional GNNs that learn from graph structure, GSNN uses the graph to constrain which variables can directly 
         influence each other. The model operates on edge features rather than node features and supports cyclic graphs.
@@ -826,6 +826,7 @@ class GSNN(torch.nn.Module):
             residual (bool, optional): If set to :obj:`True`, add residual connections. (default: :obj:`True`)
             norm_first (bool, optional): If set to :obj:`True`, apply normalization before nonlinearity. (default: :obj:`True`)
             node_attn (bool, optional): If set to :obj:`True`, apply node attention. (default: :obj:`False`)
+            attn_mlp_hidden (int, optional): Hidden dimension of the attention MLP. 
             node_mlp (bool, optional): If set to :obj:`True`, apply additional MLP processing per node to enhance 
                 representational capacity while maintaining graph structure constraints. (default: :obj:`True`)
             node_mlp_hidden (int, optional): Hidden dimension size for the node MLP when enabled. 
@@ -883,7 +884,8 @@ class GSNN(torch.nn.Module):
         self.dropout                    = dropout
         self.residual                   = residual
         self.node_attn                  = node_attn
-        self.norm_first                  = norm_first
+        self.attn_mlp_hidden            = attn_mlp_hidden
+        self.norm_first                 = norm_first
         self.node_mlp                   = node_mlp
         self.node_mlp_hidden            = node_mlp_hidden
 
@@ -931,6 +933,7 @@ class GSNN(torch.nn.Module):
                                                        lin_in           = lin_in,
                                                        lin_out          = lin_out,
                                                        node_attn        = self.node_attn,
+                                                       attn_mlp_hidden  = self.attn_mlp_hidden,
                                                        norm_first       = self.norm_first,
                                                        residual         = self.residual,
                                                        node_mlp         = self.node_mlp,
