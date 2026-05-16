@@ -8,3 +8,4 @@ scripts/experiments/SLURM_OUT/
 /GSNN.egg-info/
 /deprecated/
 *.log
+*.h5ad
