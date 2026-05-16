@@ -11,6 +11,7 @@ __all__ = [
     "ICNN",
     "Logistic",
     "NN",
+    "PathwayLatentRegularizer",
     "VAE",
     "utils",
 ]

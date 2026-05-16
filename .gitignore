@@ -7,3 +7,4 @@ scripts/experiments/SLURM_OUT/
 *.pyc
 /GSNN.egg-info/
 /deprecated/
+*.log
