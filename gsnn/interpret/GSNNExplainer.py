@@ -131,7 +131,7 @@ class GSNNExplainer:
 
         self.model = model
 
-    def explain(self, x, target_idx=None, return_weights=False, target='edge'): 
+    def explain(self, x, target_idx=None, return_weights=False, target='edge', model_kwargs=None): 
         '''
         Initializes and runs gradient descent to select a minimal subset of edges or nodes that produce comparable predictions 
         to the full graph. 
@@ -146,6 +146,10 @@ class GSNNExplainer:
             Whether to return raw weights along with the DataFrame.
         target : str, optional (default='edge')
             Whether to return 'edge' or 'node' level attributions.
+        model_kwargs : dict, optional (default=None)
+            Extra keyword arguments forwarded to every ``self.model(...)`` call
+            (e.g. ``{'x_fn': x_fn}`` for models trained with ``node_activity=True``).
+            ``edge_mask`` / ``node_mask`` are reserved and should not be included.
 
         Returns 
         -------
@@ -158,11 +162,11 @@ class GSNNExplainer:
             raise ValueError(f"target must be 'edge' or 'node', got '{target}'")
 
         if target == 'edge':
-            return self._explain_edges(x, target_idx, return_weights)
+            return self._explain_edges(x, target_idx, return_weights, model_kwargs=model_kwargs)
         elif target == 'node':
-            return self._explain_nodes(x, target_idx, return_weights)
+            return self._explain_nodes(x, target_idx, return_weights, model_kwargs=model_kwargs)
 
-    def _explain_edges(self, x, targets=None, return_weights=False):
+    def _explain_edges(self, x, targets=None, return_weights=False, model_kwargs=None):
         '''
         Compute edge-level attributions using gradient descent optimization.
         
@@ -174,6 +178,8 @@ class GSNNExplainer:
             Target output indices to explain.
         return_weights : bool, optional (default=False)
             Whether to return raw weights along with the DataFrame.
+        model_kwargs : dict, optional (default=None)
+            Extra keyword arguments forwarded to every ``self.model(...)`` call.
             
         Returns
         -------
@@ -181,6 +187,8 @@ class GSNNExplainer:
             Columns ['source', 'target', 'score'] for edge attributions.
         '''
         
+        model_kwargs = {} if model_kwargs is None else dict(model_kwargs)
+
         weights = torch.stack((self.prior*torch.ones(self.model.edge_index.size(1), dtype=torch.float32, device=self.device, requires_grad=True), 
                                 -self.prior*torch.ones(self.model.edge_index.size(1), dtype=torch.float32, device=self.device, requires_grad=True)), dim=0)
 
@@ -195,7 +203,7 @@ class GSNNExplainer:
 
         # get target predictions 
         with torch.no_grad():
-            target_preds = self.model(x)
+            target_preds = self.model(x, **model_kwargs)
 
         if targets is not None: 
             target_preds = target_preds[:, targets]
@@ -209,7 +217,7 @@ class GSNNExplainer:
 
             edge_weight, _ = torch.nn.functional.gumbel_softmax(edge_params, dim=0, hard=self.hard, tau=tau)
 
-            out = self.model(x, edge_mask=edge_weight.view(1, -1))
+            out = self.model(x, edge_mask=edge_weight.view(1, -1), **model_kwargs)
 
             if targets is not None: 
                 out = out[:, targets]
@@ -251,7 +259,7 @@ class GSNNExplainer:
                 subset_mask = (final_edge_probs > 0.5).float()
                 
                 # Evaluate performance using only edges > 0.5
-                subset_out = self.model(x, edge_mask=subset_mask.view(1, -1))
+                subset_out = self.model(x, edge_mask=subset_mask.view(1, -1), **model_kwargs)
                 if targets is not None:
                     subset_out = subset_out[:, targets]
                 
@@ -282,7 +290,7 @@ class GSNNExplainer:
         else:
             return edgedf
 
-    def _explain_nodes(self, x, targets=None, return_weights=False):
+    def _explain_nodes(self, x, targets=None, return_weights=False, model_kwargs=None):
         '''
         Compute node-level attributions using gradient descent optimization.
         
@@ -294,6 +302,8 @@ class GSNNExplainer:
             Target output indices to explain.
         return_weights : bool, optional (default=False)
             Whether to return raw weights along with the DataFrame.
+        model_kwargs : dict, optional (default=None)
+            Extra keyword arguments forwarded to every ``self.model(...)`` call.
             
         Returns
         -------
@@ -301,6 +311,8 @@ class GSNNExplainer:
             Columns ['node', 'score'] for node attributions.
         '''
         
+        model_kwargs = {} if model_kwargs is None else dict(model_kwargs)
+
         weights = torch.stack((self.prior*torch.ones(self.model.num_nodes, dtype=torch.float32, device=self.device, requires_grad=True), 
                                 -self.prior*torch.ones(self.model.num_nodes, dtype=torch.float32, device=self.device, requires_grad=True)), dim=0)
 
@@ -315,7 +327,7 @@ class GSNNExplainer:
 
         # get target predictions 
         with torch.no_grad():
-            target_preds = self.model(x)
+            target_preds = self.model(x, **model_kwargs)
         if targets is not None: 
             target_preds = target_preds[:, targets]
 
@@ -328,7 +340,7 @@ class GSNNExplainer:
 
             node_weight, _ = torch.nn.functional.gumbel_softmax(node_params, dim=0, hard=self.hard, tau=tau)
 
-            out = self.model(x, node_mask=node_weight.view(1, -1))
+            out = self.model(x, node_mask=node_weight.view(1, -1), **model_kwargs)
 
             if targets is not None: 
                 out = out[:, targets]
@@ -370,7 +382,7 @@ class GSNNExplainer:
                 subset_mask = (final_node_probs > 0.5).float()
                 
                 # Evaluate performance using only nodes > 0.5
-                subset_out = self.model(x, node_mask=subset_mask.view(1, -1))
+                subset_out = self.model(x, node_mask=subset_mask.view(1, -1), **model_kwargs)
                 if targets is not None:
                     subset_out = subset_out[:, targets]
                 

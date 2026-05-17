@@ -52,6 +52,7 @@ class ChannelEMANorm(nn.Module):
             self.register_parameter('num_batches_tracked', None)
 
     def forward(self, x):
+        """Normalize using per-channel running EMA stats (updated while training)."""
         # Handle input shape (B, C) or (B, C, 1)
         original_shape = x.shape
         if x.dim() == 3 and x.size(-1) == 1:

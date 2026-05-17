@@ -1,31 +1,35 @@
+"""Neural network model components for GSNN."""
+
+from .ChannelEMANorm import ChannelEMANorm
+from .GSNN import GSNN
+from .GroupBatchNorm import GroupBatchNorm
+from .GroupEMANorm import GroupEMANorm
+from .GroupLayerNorm import GroupLayerNorm
+from .GroupRMSNorm import GroupRMSNorm
+from .NN import NN
+from .NodeAttention import NodeAttention
+from .NodeMLP import NodeMLP
+from .PathwayLatentRegularizer import PathwayLatentRegularizer
+from .ResBlock import ResBlock
+from .SignedMessagePassing import SignedMessagePassing
+from .SoftmaxGroupNorm import SoftmaxGroupNorm
+from .SparseLinear import SparseLinear
+from . import utils
+
 __all__ = [
-    "AE",
+    "ChannelEMANorm",
     "GSNN",
     "GroupBatchNorm",
+    "GroupEMANorm",
     "GroupLayerNorm",
     "GroupRMSNorm",
-    "GroupEMANorm",
-    "ChannelEMANorm",
+    "NN",
+    "NodeAttention",
+    "NodeMLP",
+    "PathwayLatentRegularizer",
+    "ResBlock",
+    "SignedMessagePassing",
     "SoftmaxGroupNorm",
     "SparseLinear",
-    "ICNN",
-    "Logistic",
-    "NN",
-    "PathwayLatentRegularizer",
-    "VAE",
     "utils",
 ]
-
-from importlib import import_module as _import_module
-
-# Import submodules so that they are available as attributes of `gsnn.models`.
-for _mod in __all__:
-    try:
-        _import_module(f"{__name__}.{_mod}")
-    except ModuleNotFoundError:
-        # During docs build heavy deps are mocked, some optional modules may be missing.
-        # Silently ignore to keep import lightweight.
-        pass
-
-# Clean up helper symbol.
-del _import_module

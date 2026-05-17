@@ -2,7 +2,6 @@ from tkinter import NONE
 import networkx as nx 
 import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
-import numpy as np
 
 def plot_edge_importance(res, pos=None, cmap=plt.cm.coolwarm, title='', figsize=(4,3), roots=None, leafs=None, interactive=False, save=None, dpi=300, colorbar_label='Edge Importance'): 
 

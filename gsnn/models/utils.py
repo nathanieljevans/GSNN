@@ -1,318 +1,354 @@
 import torch
-import copy 
 import numpy as np
-from collections import Counter
-import os
-from torch.utils.tensorboard import SummaryWriter
 from sklearn.metrics import r2_score
-import pandas as pd
-from sklearn.linear_model import SGDRegressor, LinearRegression
-from sklearn.multioutput import MultiOutputRegressor
-from sklearn.metrics import r2_score
-from sklearn.preprocessing import LabelBinarizer
-import torch_geometric as pyg
-from sklearn.preprocessing import minmax_scale
 from scipy.stats import spearmanr
-    
 
-def compute_sample_weights(sig_ids, max_prob_fold_diff=100):
-    """
-    Calculate the sample weights based on the joint frequency of cell lines and perturbation IDs.
-    
+
+#########################################################################################################################
+######################################### GSNN utils ################################################################
+#########################################################################################################################
+
+
+def hetero2homo(edge_index_dict, node_names_dict, edge_weight_dict=None): 
+    r"""Convert a heterogeneous GSNN graph into a homogeneous graph representation.
+
+    The GSNN pipeline distinguishes three edge types:
+        1. ('input', 'to', 'function')
+        2. ('function', 'to', 'function')
+        3. ('function', 'to', 'output')
+
+    This function stacks these edge sets into one homogeneous graph and returns
+    boolean masks that let you recover the original node semantics.
+
     Args:
-        cell_lines (numpy.ndarray): A numpy array containing the cell line for each example.
-        pert_ids (numpy.ndarray): A numpy array containing the perturbation ID for each example.
-    
+        edge_index_dict (Dict[Tuple[str, str, str], Tensor]): Edge-type mapping where each
+            value is a :obj:`LongTensor` with shape :obj:`[2, num_edges_of_type]`.
+        node_names_dict (Dict[str, List[str]]): Mapping of node types ('input', 'function', 'output')
+            to their respective node names.
+        edge_weight_dict (Dict[Tuple[str, str, str], Tensor]): Dictionary mapping edge types to edge weights.
+            Expected keys are ('input', 'to', 'function'), ('function', 'to', 'function'), and 
+            ('function', 'to', 'output'). Values should be tensors of shape :obj:`[num_edges]`.
+            (default: :obj:`None`)
+
     Returns:
-        torch.Tensor: A PyTorch tensor containing the sample weights for each example.
+        tuple: A tuple containing:
+            - edge_index (Tensor): Homogeneous edge indices of shape :obj:`[2, num_edges]`
+            - input_mask (Tensor): Boolean mask for input nodes of shape :obj:`[num_nodes]`
+            - output_mask (Tensor): Boolean mask for output nodes of shape :obj:`[num_nodes]`
+            - num_nodes (int): Total number of nodes in the homogeneous graph
+            - homo_names (List[str]): Node names in homogeneous ordering
+            - edge_weight (Optional[Tensor]): Homogeneous edge weights of shape :obj:`[num_edges]`,
+              or :obj:`None` if :obj:`edge_weight_dict` was :obj:`None`.
+
+    Example:
+        >>> edge_index_dict = {
+        ...     ('input', 'to', 'function'): torch.tensor([[0, 1], [0, 0]]),
+        ...     ('function', 'to', 'function'): torch.tensor([[0], [0]]),
+        ...     ('function', 'to', 'output'): torch.tensor([[0], [0]])
+        ... }
+        >>> node_names_dict = {
+        ...     'input': ['in1', 'in2'],
+        ...     'function': ['func1'],
+        ...     'output': ['out1']
+        ... }
+        >>> edge_index, in_mask, out_mask, n_nodes, names = hetero2homo(
+        ...     edge_index_dict, node_names_dict
+        ... )
+        >>> print(edge_index.shape)  # [2, 4]
+        >>> print(in_mask.sum())  # 2 (number of input nodes)
+        >>> print(out_mask.sum())  # 1 (number of output nodes)
     """
 
-    cell_lines, pert_ids = get_sigid_attrs(sig_ids)
+    # convert edge_index_dict to edge_index (homogenous)
+    input_edge_index = edge_index_dict['input', 'to', 'function'].clone()
+    function_edge_index = edge_index_dict['function', 'to', 'function'].clone()
+    output_edge_index = edge_index_dict['function', 'to', 'output'].clone()
 
-    # Combine cell_lines and pert_ids into pairs
-    cell_line_pert_pairs = list(zip(cell_lines, pert_ids))
+    N_input = len(node_names_dict['input'])
+    N_function = len(node_names_dict['function'])
+    N_output = len(node_names_dict['output'])
 
-    # Calculate the joint frequency of each unique cell line and pert_id pair
-    pair_counts = Counter(cell_line_pert_pairs)
-    total_count = len(cell_lines)
+    # add offsets to treat as unique nodes 
+    input_edge_index[0, :] = input_edge_index[0,:] + N_function  # increment input nodes only 
 
-    # Calculate the inverse joint frequency and assign it as weight for each example
-    weights = np.array([total_count / pair_counts[pair] for pair in cell_line_pert_pairs], dtype=np.float32)
+    output_edge_index[1, :] = output_edge_index[1, :] + N_function + N_input # increment output nodes only 
 
-    # Convert the weights to a PyTorch tensor
-    sample_weights = torch.from_numpy(weights)
+    edge_index = torch.cat((function_edge_index, input_edge_index, output_edge_index), dim=1)
 
-    sample_prob = sample_weights / sample_weights.sum()
-
-    clip_low = sample_prob.min()
-    clip_high = clip_low*max_prob_fold_diff
-
-    sample_prob = np.clip(sample_prob, clip_low, clip_high)
-
-    print()
-    print('Balancing training obs. sampling probabilities...')
-    print('max prob. fold change (min-max)', max_prob_fold_diff)
-    print('\tmin sample prob:', sample_prob.min())
-    print('\tmax sample prob', sample_prob.max())
-    print('\taverage sample prob', sample_prob.mean())
-    print()
-
-    return sample_prob
-
-
-def get_sigid_attrs(sig_ids):
-    """
-    Extract cell line names (cell_inames) and perturbation IDs (pert_id) from the given signature IDs (sig_ids).
+    if edge_weight_dict is not None:
+        edge_weight = torch.cat((edge_weight_dict['function', 'to', 'function'], 
+                                 edge_weight_dict['input', 'to', 'function'], 
+                                 edge_weight_dict['function', 'to', 'output']), dim=0)
+    else:
+        edge_weight = None
     
+    input_node_mask = torch.zeros((N_input + N_function + N_output), dtype=torch.bool)
+    input_nodes = torch.arange(N_input) + N_function
+    input_node_mask[input_nodes] = True
+
+    output_node_mask = torch.zeros((N_input + N_function + N_output), dtype=torch.bool)
+    output_nodes = torch.arange(N_output) + N_function + N_input
+    output_node_mask[output_nodes] = True
+
+    num_nodes = N_input + N_function + N_output
+
+    homo_names = node_names_dict['function'] + node_names_dict['input'] + node_names_dict['output']
+
+    return edge_index, input_node_mask, output_node_mask, num_nodes, homo_names, edge_weight
+
+
+def get_Win_indices(edge_index, channels, function_nodes): 
+    r"""Build sparse COO indices for the input weight matrix :math:`W_{in}`.
+
     Args:
-        sig_ids (list or array-like): A list or array of signature IDs to be parsed.
-    
+        edge_index (Tensor): Homogeneous edge index of shape :obj:`[2, num_edges]`.
+        channels (int or Tensor): If int, every function node gets the same number of hidden channels.
+            If 1-D tensor/array, it must contain the per-node channel count of length :obj:`num_nodes`.
+        function_nodes (Tensor): Index list of nodes that represent functions.
+
     Returns:
-        tuple: A tuple containing two lists:
-            - cell_inames (list): Cell line names corresponding to the input signature IDs.
-            - pert_ids (list): Perturbation IDs corresponding to the input signature IDs.
+        tuple: A tuple containing:
+            - indices (Tensor): COO indices of shape :obj:`[2, nnz]` for sparse tensor construction
+            - channel_count (numpy.ndarray): Per-node channel counts for later reuse
+
+    Example:
+        >>> edge_index = torch.tensor([[0, 1], [1, 0]])  # 2 edges
+        >>> channels = 3  # 3 channels per function node
+        >>> function_nodes = torch.tensor([0])  # Node 0 is a function node
+        >>> indices, counts = get_Win_indices(edge_index, channels, function_nodes)
+        >>> print(indices.shape)  # [2, 6] (2 edges * 3 channels)
+        >>> print(counts)  # [3, 0] (3 channels for node 0, 0 for node 1)
     """
-    cell_inames = []
-    pert_ids = []
 
-    for sig_id in sig_ids:
-        try: 
-            # MET001_N8_XH:BRD-U44432129:100:336
-
-            # Split the sig_id using '_' and ':'
-            parts = sig_id.split('_')
-            cell_iname = parts[1]
-
-            # Extract the pert_id from the second part
-            pert_id = parts[2].split(':')[1]
-
-            cell_inames.append(cell_iname)
-            pert_ids.append(pert_id)
-        except: 
-            raise ValueError(f'failed `sig_id` parse: {sig_id}')
-
-    return cell_inames, pert_ids
-
-
-def _get_regressed_metrics(y, yhat, sig_ids, siginfo, ignore_errors=True): 
-    try: 
-        r_cell = get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
-    except: 
-        r_cell = -666
-        if not ignore_errors: raise
-    try:
-        r_drug = get_regressed_r(y, yhat, sig_ids, vars=['cell_iname', 'pert_dose'], multioutput='uniform_weighted', siginfo=siginfo)
-    except: 
-        r_drug = -666
-        if not ignore_errors: raise
-    try: 
-        r_dose = get_regressed_r(y, yhat, sig_ids, vars=['pert_id', 'cell_iname'], multioutput='uniform_weighted', siginfo=siginfo)
-    except: 
-        r_dose = -666
-        if not ignore_errors: raise
-    return r_cell, r_drug, r_dose
-
-
-class TBLogger:
-    def __init__(self, root):
-        if not os.path.exists(root):
-            os.mkdir(root)
-        self.writer = SummaryWriter(log_dir=root)
-
-    def add_hparam_results(self, args, model, data, device, test_loader, val_loader, siginfo, time_elapsed, epoch):
-        if args.model == 'nn':
-            predict_fn = predict_nn 
-        elif args.model == 'gsnn':
-            predict_fn = predict_gsnn
-        elif args.model == 'gnn':
-            predict_fn = predict_gnn
-        else:
-            raise ValueError(f'unrecognized model type: {args.model}')
-        
-        y_test, yhat_test, sig_ids_test = predict_fn(test_loader, model, device)
-        y_val, yhat_val, sig_ids_val = predict_fn(val_loader, model, device)
-
-        #r_cell_test, r_drug_test, r_dose_test = _get_regressed_metrics(y_test, yhat_test, sig_ids_test, siginfo)
-        #r_cell_val, r_drug_val, r_dose_val = _get_regressed_metrics(y_val, yhat_val, sig_ids_val, siginfo)
-
-        r2_test = r2_score(y_test, yhat_test, multioutput='variance_weighted')
-        r2_val = r2_score(y_val, yhat_val, multioutput='variance_weighted')
-
-        r_flat_test = np.corrcoef(y_test.ravel(), yhat_test.ravel())[0, 1]
-        r_flat_val = np.corrcoef(y_val.ravel(), yhat_val.ravel())[0, 1]
-
-        median_r_val = corr_score(y_val, yhat_val, multioutput='uniform_median')
-        median_r_test = corr_score(y_test, yhat_test, multioutput='uniform_median')
-
-        mean_r_val = corr_score(y_val, yhat_val, multioutput='uniform_weighted')
-        mean_r_test = corr_score(y_test, yhat_test, multioutput='uniform_weighted')
-
-        mse_test = np.mean((y_test - yhat_test)**2)
-        mse_val = np.mean((y_val - yhat_val)**2)
-
-        hparam_dict = args.__dict__
-        metric_dict = {
-            'median_r_val': median_r_val,
-            'median_r_test': median_r_test,
-            'mean_r_val': mean_r_val,
-            'mean_r_test': mean_r_test,
-            'r2_test': r2_test,
-            'r2_val': r2_val,
-            'r_flat_test': r_flat_test,
-            'r_flat_val': r_flat_val,
-            #'r_cell_test': r_cell_test,
-            #'r_cell_val': r_cell_val,
-            #'r_drug_test': r_drug_test,
-            #'r_drug_val': r_drug_val,
-            #'r_dose_test': r_dose_test,
-            #'r_dose_val': r_dose_val,
-            'mse_test': mse_test,
-            'mse_val': mse_val,
-            'time_elapsed': time_elapsed,
-            'eval_at_epoch': epoch
-        }
-
-        self.writer.add_hparams(hparam_dict, metric_dict)
-
-        return metric_dict, yhat_test, sig_ids_test
-
-    def log(self, epoch, train_metrics, val_metrics):
-        # Expecting train_metrics and val_metrics to be dictionaries,
-        # something like: {'loss': ..., 'r2': ..., 'r_flat': ...}
-
-        '''
-        train_loss = train_metrics.get('loss', None)
-        val_r2 = val_metrics.get('r2', None)
-        val_r_flat = val_metrics.get('r_flat', None)
-        val_mse = val_metrics.get('mse', None)
-
-        if train_loss is not None:
-            self.writer.add_scalar('train-loss', train_loss, epoch)
-        if val_r2 is not None:
-            self.writer.add_scalar('val-r2', val_r2, epoch)
-        if val_r_flat is not None:
-            self.writer.add_scalar('val-corr-flat', val_r_flat, epoch)
-        if val_mse is not None:
-            self.writer.add_scalar('val-mse', val_mse, epoch)
-        '''
-        for k,v in train_metrics.items(): 
-            self.writer.add_scalar(f'train-{k}', v, epoch)
-
-        for k,v in val_metrics.items():
-            self.writer.add_scalar(f'val-{k}', v, epoch)
-
-
-def get_activation(act): 
-
-    if act == 'relu': 
-        return torch.nn.ReLU 
-    elif act == 'leakyrelu':
-        return torch.nn.LeakyReLU
-    elif act == 'prelu': 
-        return torch.nn.PReLU
-    elif act == 'elu': 
-        return torch.nn.ELU 
-    elif act == 'gelu': 
-        return torch.nn.GELU 
-    elif act == 'tanh': 
-        return torch.nn.Tanh
-    elif act == 'mish': 
-        return torch.nn.Mish 
-    elif act == 'selu': 
-        return torch.nn.SELU  
-    elif act == 'softplus': 
-        return torch.nn.Softplus  
-    elif act == 'linear': 
-        return torch.nn.Identity
-    else:
-        raise ValueError(f'unrecognized activation function: {act}')
-
-def get_optim(optim): 
-
-    if optim == 'adam': 
-        return torch.optim.Adam 
-    elif optim == 'adan': 
-        try: 
-            from adan import Adan
-        except: 
-            raise ImportError('adan not installed. Please install adan (see: https://github.com/sail-sg/Adan)')
-        return Adan
-    elif optim == 'sgd': 
-        return torch.optim.SGD 
-    elif optim == 'rmsprop': 
-        return torch.optim.RMSprop
-    else:
-        raise ValueError(f'unrecognized optim argument: {optim}')
-    
-def get_crit(crit): 
-
-    if crit == 'mse': 
-        return torch.nn.MSELoss
-    elif crit == 'huber': 
-        return torch.nn.HuberLoss
-    else:
-        raise ValueError(f'unrecognized optim argument: {crit}')
-    
-def get_scheduler(optim, args, loader): 
-
-    if args.sched == 'none': 
-        return None
-    elif args.sched == 'onecycle': 
-        return torch.optim.lr_scheduler.OneCycleLR(optim, max_lr=args.lr, 
-                                                    epochs=args.epochs, 
-                                                    steps_per_epoch=len(loader), 
-                                                    pct_start=0.3)
-    elif args.sched == 'cosine': 
-        return torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs*len(loader), eta_min=1e-7)
-    else:
-        raise ValueError(f'unrecognized lr scheduler: {args.sched}')
-    
-
-def _degree_to_channels(edge_index, min_size=3, max_size=25, transform=np.sqrt, verbose=False, scale_by='degree', clip_degree=250): 
-    '''
-    utility function to create variable number of channels per function node, dependent on the degree of each node. 
-
-    # channels = minmax_scale(transform(degree), range=(min_size, max_size))
-
-    Args: 
-        edge_index          torch.tensor            COO format graph edge index 
-        min_size            int                     minimum number of channels 
-        max_size            int                     maximum number of channels 
-        transform           function                transformation to be applied to degree prior to min-max scaling between range( )
-        verbose             bool                    whether to print summary statistics to console 
-        scale_by            str                     the choice of scaling metric, options: 'in_degree', 'out_degree', 'degree' 
-        clip_degree         int;None                whether to clip the maximum degree value; useful if there are outliers with large degree
-
-    Returns:
-        scaled_channels 
-    '''
+    # channels should be of size (Num_Nodes)
     num_nodes = torch.unique(edge_index.view(-1)).size(0)
-    row, col = edge_index 
-    out_degree = pyg.utils.degree(row, num_nodes).detach().cpu().numpy() 
-    in_degree = pyg.utils.degree(col, num_nodes).detach().cpu().numpy() 
+    _channels = np.zeros(num_nodes, dtype=int)
 
-    if scale_by == 'in_degree': 
-        degree = in_degree 
-    elif scale_by == 'out_degree': 
-        degree = out_degree 
-    elif scale_by == 'degree': 
-        degree = in_degree + out_degree 
+    # Convert function node indices to numpy for numpy array indexing
+    func_nodes_np = function_nodes.detach().cpu().numpy()
+
+    # Populate per-node channel counts
+    if isinstance(channels, (int, np.integer)):
+        _channels[func_nodes_np] = int(channels)
+    else:
+        ch_arr = np.asarray(channels, dtype=int)
+        if ch_arr.shape[0] != int(num_nodes):
+            raise ValueError(
+                f"channels must be an int or a length-{int(num_nodes)} array; got shape {ch_arr.shape}"
+            )
+        _channels = ch_arr.copy()
+
+    row = []
+    col = []
+    edge_np = edge_index.detach().cpu().numpy()
+    func_nodes_set = set(func_nodes_np.tolist())
+    for edge_id, (_, node_id) in enumerate(edge_np.T):
+        # skip edges whose destination is not a function node
+        if int(node_id) not in func_nodes_set:
+            continue
+        c = int(_channels[int(node_id)])  # number of func. node channels
+        node_id_idx0 = int(np.sum(_channels[: int(node_id) ]))  # index of first hidden channel for this node
+        for k in range(c):
+            row.append(edge_id)
+            col.append(node_id_idx0 + k)
+
+    row = torch.tensor(row, dtype=torch.long)
+    col = torch.tensor(col, dtype=torch.long)
+    indices = torch.stack((row,col), dim=0)
+    return indices, _channels
+
+
+
+def get_Wout_indices(edge_index, function_nodes, channels): 
+    r"""Build sparse COO indices for the output weight matrix :math:`W_{out}`.
+
+    Args:
+        edge_index (Tensor): Homogeneous edge index of shape :obj:`[2, num_edges]`.
+        function_nodes (Tensor): Index list of nodes that represent functions.
+        channels (numpy.ndarray): Array indicating the number of channels for each node.
+
+    Returns:
+        Tensor: COO indices of shape :obj:`[2, nnz]` for sparse tensor construction.
+
+    Example:
+        >>> edge_index = torch.tensor([[0, 1], [1, 0]])  # 2 edges
+        >>> function_nodes = torch.tensor([0])  # Node 0 is a function node
+        >>> channels = np.array([3, 0])  # 3 channels for node 0, 0 for node 1
+        >>> indices = get_Wout_indices(edge_index, function_nodes, channels)
+        >>> print(indices.shape)  # [2, 6] (3 channels * 2 edges)
+    """
+
+    row = [] 
+    col = []
+    for node_id in function_nodes: 
+        
+        # get the edge ids of the function node 
+        src,_ = edge_index 
+        out_edges = (src == node_id).nonzero(as_tuple=True)[0]
+
+        c = channels[int(node_id)]                                  # number of func. node channels 
+        node_id_idx0 = np.sum(channels[:node_id.item()])       # node indexing: index of the first hidden channel for a given function node 
+
+        for k in range(c):
+            for edge_id in out_edges: 
+                row.append(node_id_idx0 + k)
+                col.append(edge_id.item())
+
+    row = torch.tensor(row, dtype=torch.long)
+    col = torch.tensor(col, dtype=torch.long)
+    indices = torch.stack((row,col), dim=0)
+    return indices
+
+
+
+
+
+
+def node2edge(x, edge_index): 
+    r"""Convert node-level features to edge-level features. Every out-going edge receives the feature of the source node.
+
+    Args:
+        x (Tensor): Node features of shape :obj:`[batch_size, num_nodes]`.
+        edge_index (Tensor): Edge indices of shape :obj:`[2, num_edges]`.
+
+    Returns:
+        Tensor: Edge features of shape :obj:`[batch_size, num_edges]`.
+
+    Example:
+        >>> x = torch.randn(32, 4)  # [batch_size, num_nodes]
+        >>> edge_index = torch.tensor([[0, 1], [1, 2]])  # 2 edges
+        >>> edge_features = node2edge(x, edge_index)
+        >>> print(edge_features.shape)  # [32, 2]
+    """
+    src,dst = edge_index 
+    return x[:, src] 
+
+
+
+
+
+
+def edge2node(x, edge_index, output_node_mask): 
+    r"""Convert edge-level features back to node-level features, focusing on output nodes.
+
+    Typically, output nodes should be designed to have an in-degree of 1, however, in the case of multiple edges per output node, 
+    the output features are summed and normalized by the square root of the in-degree.
+
+    Args:
+        x (Tensor): Edge features of shape :obj:`[batch_size, num_edges]`.
+        edge_index (Tensor): Edge indices of shape :obj:`[2, num_edges]`.
+        output_node_mask (Tensor): Boolean mask of shape :obj:`[num_nodes]` indicating output nodes.
+
+    Returns:
+        Tensor: Node features of shape :obj:`[batch_size, num_output_nodes]`.
+
+    Example:
+        >>> x = torch.randn(32, 3)  # [batch_size, num_edges]
+        >>> edge_index = torch.tensor([[0, 1, 1], [2, 2, 3]])  # 3 edges
+        >>> output_mask = torch.tensor([0, 0, 1, 1])  # Nodes 2,3 are outputs
+        >>> node_features = edge2node(x, edge_index, output_mask)
+        >>> print(node_features.shape)  # [32, 2]
+    """
+
+    output_node_ixs = output_node_mask.nonzero(as_tuple=True)[0]
+    src, dst = edge_index 
+    output_edge_mask = torch.isin(dst, output_node_ixs)
+
+    B = x.size(0)
+    out = torch.zeros(B, output_node_mask.size(0), dtype=torch.float32, device=x.device)
+
+    #out[:, dst[output_edge_mask].view(-1)] = x[:, output_edge_mask].view(B, -1)
+    idx = dst[output_edge_mask].view(1, -1).expand(B, -1)
+    src = x[:, output_edge_mask].view(B, -1)
+    out = out.scatter_add(1, idx, src)
+
+    # this is only applicable if there are many edges per output node 
+    # user can define the graph structure to avoid this but jic... 
+    deg_in = torch.bincount(dst, minlength=out.size(1)).clamp_min(1)
+    out = out / deg_in.sqrt()
+
+    return out
+
+
+
+
+
+def get_conv_indices(edge_index, channels, function_nodes): 
+    r"""Compute indexing structures for convolutional (sparse linear) layers.
+
+    Args:
+        edge_index (Tensor): Homogeneous edge indices of shape :obj:`[2, num_edges]`.
+        channels (int): Number of channels per function node.
+        function_nodes (Tensor): Indices of function nodes.
+
+    Returns:
+        tuple: A tuple containing:
+            - w_in_indices (Tensor): Indexing for :math:`W_{in}`
+            - w_out_indices (Tensor): Indexing for :math:`W_{out}`
+            - w_in_size (tuple): Size specification for :math:`W_{in}`
+            - w_out_size (tuple): Size specification for :math:`W_{out}`
+            - channel_groups (List[int]): List mapping each channel to its node
+
+    Example:
+        >>> edge_index = torch.tensor([[0, 1], [1, 0]])  # 2 edges
+        >>> channels = 3  # 3 channels per function node
+        >>> function_nodes = torch.tensor([0])  # Node 0 is a function node
+        >>> indices = get_conv_indices(edge_index, channels, function_nodes)
+        >>> print(len(indices))  # 5 (w_in_indices, w_out_indices, sizes, groups)
+    """
+
+    E = edge_index.size(1)  
+    w_in_indices, node_hidden_channels = get_Win_indices(edge_index, channels, function_nodes)
+    w_out_indices = get_Wout_indices(edge_index, function_nodes, node_hidden_channels)
+    w_in_size = (E, np.sum(node_hidden_channels))
+    w_out_size = (np.sum(node_hidden_channels), E)
+
+    channel_groups = [] 
+    for node_id, c in enumerate(node_hidden_channels): 
+        for i in range(c): 
+            channel_groups.append(node_id)
+
+    return (w_in_indices, w_out_indices, w_in_size, w_out_size, channel_groups)
+
+#########################################################################################################################
+######################################### ResBlock utils ################################################################
+#########################################################################################################################
+
+def apply_norm_and_nonlin(norm, nonlin, out, norm_first): 
+    r"""Apply normalization and nonlinearity to the input tensor.
+
+    Args:
+        norm (callable): Normalization layer or operation.
+        nonlin (callable): Nonlinear activation function.
+        out (Tensor): Input tensor to be normalized and activated.
+        norm_first (bool): If :obj:`True`, apply normalization before nonlinearity.
+
+    Returns:
+        Tensor: The transformed tensor.
+
+    Example:
+        >>> norm = torch.nn.BatchNorm1d(32)
+        >>> nonlin = torch.nn.ReLU()
+        >>> x = torch.randn(16, 32)  # [batch_size, num_features]
+        >>> # Apply normalization first
+        >>> out = apply_norm_and_nonlin(norm, nonlin, x, norm_first=True)
+        >>> print(out.shape)  # [16, 32]
+    """
+    if norm_first: 
+        out = norm(out)
+        out = nonlin(out)  
     else: 
-        raise ValueError(f'`_degree_to_channels` got unexpected `scale_by` argument, expected one of: in_degree, out_degree, degree but got: {scale_by}')
-    
-    if clip_degree is not None: 
-        degree = np.clip(degree, 0, clip_degree)
+        out = nonlin(out)  
+        out = norm(out)
 
-    scaled_channels = transform(degree)                                                                                     # apply degree transformation 
-    func_node_mask = (in_degree > 0) * (out_degree > 0)
-    scaled_channels[func_node_mask] = minmax_scale(scaled_channels[func_node_mask], feature_range=(min_size, max_size))     # scale between `min_size` and `max_size`
-    scaled_channels = np.array([int(np.round(x, decimals=0)) for x in scaled_channels])                                     # ensure integers 
-    scaled_channels[~func_node_mask] = 0                                                                                    # only function nodes need hidden channels; input/output nodes have no function. To ensure proper indexing, we will have a surrogate index for input/output nodes. Note: this does not impact the number of parameters. 
-    if verbose: print('mean # of function node channels (scaled)', np.mean(scaled_channels[func_node_mask]))
-    
-    return scaled_channels
+    return out
 
-def predict_gsnn(loader, model, device, verbose=True): 
+#########################################################################################################################
+######################################### Prediction utils ################################################################
+#########################################################################################################################
+
+def predict_gsnn(loader, model, device, verbose=True):
+    """Run ``model`` on ``loader``; return stacked numpy ``y``, ``yhat``, and sig ids from batches."""
 
     model = model.eval()
 
@@ -340,94 +376,6 @@ def predict_gsnn(loader, model, device, verbose=True):
 
     return y, yhat, sig_ids
 
-def predict_nn(loader, model, device, verbose=True): 
-
-    model = model.eval()
-
-    ys = [] 
-    yhats = [] 
-    sig_ids = []
-    
-    with torch.no_grad(): 
-        for i,(x, y, sig_id) in enumerate(loader): 
-            if verbose: print(f'progress: {i}/{len(loader)}', end='\r')
-
-            x = x.to(device).squeeze(-1)
-            yhat = model(x)
-            y = y.to(device).squeeze(-1)
-
-            yhat = yhat.detach().cpu() 
-            y = y.detach().cpu()
-
-            ys.append(y)
-            yhats.append(yhat)
-            sig_ids += np.array(sig_id).ravel().tolist()
-
-    y = torch.cat(ys, dim=0).detach().cpu().numpy()
-    yhat = torch.cat(yhats, dim=0).detach().cpu().numpy()
-
-    return y, yhat, sig_ids
-
-def predict_gnn(loader, model, device, verbose=True): 
-
-    model = model.eval()
-
-    ys = [] 
-    yhats = [] 
-    sig_ids = []
-    
-    with torch.no_grad(): 
-        for i,(batch) in enumerate(loader): 
-            if verbose: print(f'progress: {i}/{len(loader)}', end='\r')
-            
-            yhat_dict = model({k:v.to(device) for k,v in batch.x_dict.items()}, 
-                              {k:v.to(device) for k,v in batch.edge_index_dict.items()})
-            
-            #  select output nodes
-            yhat = yhat_dict['output']
-            y = batch.y_dict['output'].to(device)
-
-            B = len(batch.sig_id)
-
-            yhat = yhat.view(B, -1).detach().cpu()
-            y = y.view(B, -1).detach().cpu()
-
-            ys.append(y)
-            yhats.append(yhat)
-            sig_ids += batch.sig_id
-
-    y = torch.cat(ys, dim=0).detach().cpu().numpy()
-    yhat = torch.cat(yhats, dim=0).detach().cpu().numpy()
-
-    return y, yhat, sig_ids
-
-def randomize(data): 
-    '''
-    
-    '''
-    print('NOTE: RANDOMIZING EDGE INDEX')
-    # permute edge index 
-    edge_index_dict = copy.deepcopy(data.edge_index_dict)
-    N_funcs = len(data.node_names_dict['function'])
-
-    # randomize the input edges (e.g., drug targets and omics)
-    # randomly select drug targets from all possible proteins 
-    src,dst = edge_index_dict['input', 'to', 'function']
-    dst = torch.tensor(np.random.choice(np.arange(N_funcs), size=(len(dst))), dtype=torch.long)
-    edge_index_dict['input', 'to', 'function'] = torch.stack((src, dst), dim=0)
-
-    # randomize the function node connections
-    src,dst = edge_index_dict['function', 'to', 'function']
-    src = torch.tensor(np.random.choice(np.arange(N_funcs), size=(len(dst))), dtype=torch.long)
-    dst = torch.tensor(np.random.choice(np.arange(N_funcs), size=(len(dst))), dtype=torch.long)
-    edge_index_dict['function', 'to', 'function'] = torch.stack((src, dst), dim=0)
-
-    # randomize the output edge mask (e.g., endogenous feature connections)
-    src,dst = edge_index_dict['function', 'to', 'output']
-    src = torch.tensor(np.random.choice(np.arange(N_funcs), size=(len(dst))), dtype=torch.long)
-    edge_index_dict['function', 'to', 'output'] = torch.stack((src, dst), dim=0)
-
-    return edge_index_dict
 
 
 
@@ -469,78 +417,3 @@ def corr_score(y, yhat, multioutput='uniform_weighted', method='pearson', eps=1e
         return np.array(corrs)
     else:
         raise ValueError('unrecognized multioutput value, expected one of "uniform_weighted", "raw_values"')
-
-def regress_out(y, df, vars): 
-    '''
-    regress out variance from certain variables 
-
-    inputs 
-        y       numpy array     signal to modify 
-        df      dataframe       co-variates options 
-        vars    list<str>       variables to regress out; must be columns in dataframe 
-
-    outputs 
-        numpy array     augmented y signal 
-    ''' 
-    if y.shape[1] == 1: y = y.ravel()
-
-    str_vars = df[vars].astype(str).agg('__'.join, axis=1)
-
-    lb = LabelBinarizer() 
-    one_hot_vars = lb.fit_transform(str_vars)
-
-    #reg = MultiOutputRegressor(SGDRegressor())
-    reg = LinearRegression()
-    reg.fit(one_hot_vars, y)
-
-    y_vars = reg.predict(one_hot_vars)
-    y_res = y - y_vars
-
-    return y_res 
-
-def bootstrap_r(y, yhat, multioutput='uniform_weighted', n=100, q_lower=0.025, q_upper=0.975): 
-    '''
-    To get a better estimate of validation performance, we compute the validation 95% confidence interval of average pearson correlation. 
-
-    Args: 
-        y               np.array            true values 
-        yhat            np.array            predicted values 
-        multioutput     str                 method to handle multioutput prediction [uniform_weighted, raw_values]
-        n               int                 number of bootstrapped samples to compute 
-        q_lower         float               lower bound quantile 
-        q_upper         float               upper bound quantile 
-
-    Returns:
-        r_low, r_up                         the lower and upper quantile of the (average) pearson correlation of y,yhat
-    '''
-    
-    r = []
-    for i in range(n): 
-        idxs = np.random.choice(np.arange(0, y.shape[0]), size=y.shape[0], replace=True)
-        r.append(corr_score(y[idxs], yhat[idxs], multioutput=multioutput))
-
-    r_low = np.quantile(np.array(r), q=q_lower)
-    r_up = np.quantile(np.array(r), q=q_upper)
-    return r_low, r_up
-
-def get_regressed_r(y, yhat, sig_ids, vars, data='../../data/', multioutput='uniform_weighted', siginfo=None): 
-    
-    if siginfo is None: siginfo = pd.read_csv(f'{data}/siginfo_beta.txt', sep='\t', low_memory=False)[['sig_id', 'pert_id', 'cell_iname', 'pert_dose']]
-
-    df = pd.DataFrame({'sig_id':sig_ids}).merge(siginfo, on='sig_id', how='left')
-
-    y_res = regress_out(y, df, vars=vars)
-    yhat_res = regress_out(yhat, df, vars=vars)
-
-    return corr_score(y_res, yhat_res, multioutput=multioutput)
-
-
-def next_divisor(N, X):
-    '''
-    returns the smallest divisor of N which is larger than or equal to X
-    '''
-    i = X
-    while N % i != 0:
-        i += 1
-
-    return i
