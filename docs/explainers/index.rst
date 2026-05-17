@@ -192,14 +192,17 @@ The GSNN explainer learns a sparse binary edge mask that maximizes fidelity to t
 
 **Contrastive GSNN Explainer**
 
-The Contrastive GSNN explainer learns a sparse binary mask (edge or node level) that maximizes fidelity to the **prediction difference** Δf = f(x₁) - f(x₂) while minimizing the number of active elements. This method identifies the minimal set of elements necessary to reproduce the differential prediction between two inputs.
+The Contrastive GSNN explainer learns a sparse binary mask (edge or node level) that maximizes fidelity to the **absolute prediction difference** ``|Δf| = |f(x₁) - f(x₂)|`` while minimizing the number of active elements. This method identifies the minimal set of elements necessary to reproduce the magnitude of the differential prediction between two inputs.
 
-When given multiple input pairs (batch), the explainer learns a **single mask** that works well across all pairs simultaneously by treating the differences as a multivariate MSE objective. This is much more efficient than per-sample optimization.
+When given multiple input pairs (batch), the explainer learns a **single mask** that works well across all pairs simultaneously by treating the absolute differences as a multivariate MSE objective. This is much more efficient than per-sample optimization.
 
 *What the results indicate:*
-  * **Scores near 1** indicate elements essential for reproducing the prediction difference
-  * **Scores near 0** indicate elements that can be removed without affecting the difference
+  * **Scores near 1** indicate elements essential for reproducing ``|Δf|``
+  * **Scores near 0** indicate elements that can be removed without affecting ``|Δf|``
   * The overall mask reveals the **minimal contrastive subgraph**
+
+.. note::
+   The objective targets the *magnitude* ``|Δf|`` rather than the signed difference ``Δf``, which is consistent with the convention used by the Contrastive IG and Contrastive Occlusion explainers. A mask that flips the sign of the prediction difference while preserving its magnitude is therefore considered faithful by this objective. In practice this is rarely an issue because optimisation starts from the full mask (where the sign is correct) and progressively sparsifies.
 
 *Attribution targets:*
   * ``target='edge'`` — learn edge-level mask (default)
@@ -221,7 +224,7 @@ When given multiple input pairs (batch), the explainer learns a **single mask** 
   * Efficient batch processing with shared mask optimization
   * Supports both edge and node level attributions
   * Automatic hyperparameter tuning via ``tune()`` method
-  * Multivariate MSE objective preserves sign and target dimensions
+  * Multivariate MSE objective preserves the magnitude of ``|Δf|`` across all target dimensions
 
 *Weaknesses:*
   * Requires paired observations
