@@ -7,13 +7,21 @@ from gsnn.models.ResBlock import ResBlock
 from gsnn.models.utils import hetero2homo, get_conv_indices, node2edge, edge2node
 from gsnn.models.NodeActivity import NodeActivity
 
+# PyTorch 2.4+ uses deprecated torch.cpu.amp.autocast inside checkpoint recompute.
+warnings.filterwarnings(
+    "ignore",
+    message=r"`torch\.cpu\.amp\.autocast\(args\.\.\.\)` is deprecated.*",
+    category=FutureWarning,
+    module="torch.utils.checkpoint",
+)
+
 class GSNN(torch.nn.Module): 
 
     def __init__(self, edge_index_dict, node_names_dict, channels, layers, dropout=0., nonlin=torch.nn.ELU, bias=True, 
                  share_layers=True, add_function_self_edges=True, norm='layer', init='degree_normalized', verbose=False, 
                  edge_channels=1, checkpoint=False, residual=True, norm_first=True, node_attn=False, attn_mlp_hidden=16,
-                 node_mlp=False, node_mlp_hidden=16, node_activity=False, node_activity_hidden=16,
-                 node_activity_dim=1, node_activity_temperature=1.0, edge_weight_dict=None):
+                 node_mlp=False, node_mlp_hidden=16, node_activity=False, node_activity_hidden=16, node_activity_mode='per-node', 
+                 node_activity_dim=1, node_activity_temperature=1.0, node_activity_dropout=0., edge_weight_dict=None):
 
         r"""Graph Structured Neural Network (GSNN) that constrains neural network architecture using a predefined graph structure.
         Unlike traditional GNNs that learn from graph structure, GSNN uses the graph to constrain which variables can directly 
@@ -65,6 +73,10 @@ class GSNN(torch.nn.Module):
                 (default: :obj:`False`)
             node_activity_hidden (int, optional): Hidden dimension of the node-activity MLP.
                 (default: :obj:`16`)
+            node_activity_mode (str, optional): Mode of node activity computation (:obj:`'per-node'`, :obj:`'per-channel'`).
+                If :obj:`'per-node'`, the node activity is computed for each function node independently. 
+                If :obj:`'per-channel'`, the node activity is computed for each channel of the function node.
+                (default: :obj:`'per-node'`). In both cases the node activity function is shared across all function nodes and layers. 
             node_activity_dim (int, optional): Number of external feature channels per function node
                 expected as input to the node-activity MLP. When :obj:`1`, the user may pass
                 :obj:`x_fn` as :obj:`[B, Nf]` and it will be unsqueezed internally; otherwise
@@ -72,6 +84,8 @@ class GSNN(torch.nn.Module):
             node_activity_temperature (float, optional): Sigmoid temperature applied to the node-activity
                 logits. Lower values produce sharper (closer to 0/1) gates, higher values produce softer
                 (closer to 0.5) gates. (default: :obj:`1.0`)
+            node_activity_dropout (float, optional): Dropout probability applied to the node-activity MLP.
+                (default: :obj:`0.0`)
             edge_weight_dict (Dict[Tuple[str, str, str], Tensor], optional): Dictionary mapping edge types to edge weights.
                 Expected keys are ('input', 'to', 'function'), ('function', 'to', 'function'), and 
                 ('function', 'to', 'output'). Values should be tensors of shape :obj:`[num_edges]`.
@@ -133,12 +147,7 @@ class GSNN(torch.nn.Module):
         self.node_activity_hidden       = node_activity_hidden
         self.node_activity_dim          = node_activity_dim
         self.node_activity_temperature  = node_activity_temperature
-
-        if self.checkpoint: 
-            # BUG:  checkpoint.py:1399: FutureWarning: `torch.cpu.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cpu', args...)` instead.
-            #       with device_autocast_ctx, torch.cpu.amp.autocast(**cpu_autocast_kwargs), recompute_context:  # type: ignore[attr-defined]
-            #       /home/teddy/miniconda3/envs/gsnn-lib/lib/python3.12/site-packages/torch/utils/checkpoint.py:1399: FutureWarning: `torch.cpu.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cpu', args...)` instead.
-            warnings.filterwarnings("ignore", category=FutureWarning)
+        self.node_activity_dropout      = node_activity_dropout
 
         self.register_buffer('output_node_mask', output_node_mask)
         self.register_buffer('input_node_mask', input_node_mask)
@@ -172,9 +181,10 @@ class GSNN(torch.nn.Module):
         if self.node_activity: 
             self.node_activity_model = NodeActivity(channel_groups,
                                                     activity_dim=node_activity_dim,
-                                                    dropout=dropout,
+                                                    dropout=node_activity_dropout,
                                                     temperature=node_activity_temperature,
-                                                    channels=node_activity_hidden)
+                                                    channels=node_activity_hidden,
+                                                    mode=node_activity_mode)
         else: 
             self.node_activity_model = None
 

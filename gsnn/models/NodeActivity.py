@@ -30,29 +30,45 @@ class NodeActivity(torch.nn.Module):
                  activity_dim=1, 
                  dropout: float = 0.0, 
                  temperature: float = 1.0, 
-                 channels=16):
+                 channels=16, 
+                 mode='per-node'):
         super().__init__()
+
+        self.mode = mode
 
         # Convert and store channel → node mapping
         self.register_buffer('channel_groups', torch.as_tensor(channel_groups, dtype=torch.long))
         self.Ncg = len(channel_groups)
 
         self.n_nodes: int = int(self.channel_groups.max().item() + 1)
-        self.dropout: float = float(dropout)
         self.temperature: float = float(temperature)
         
         # Compute how many channels belong to each node (assume uniform)
         self.channels_per_node: int = int(self.channel_groups.numel() // self.n_nodes)
         self.activity_dim: int = int(activity_dim)
 
+        self.dropout = nn.Dropout(dropout)
+
+        if mode == 'per-node':
+            out_dim = 1 
+        elif mode == 'per-channel':
+            out_dim = self.channels_per_node
+        else:
+            raise ValueError(f"Invalid mode: {mode}. Must be 'per-node' or 'per-channel'.")
+
         # Shared MLP that maps a vector of node-channels → scalar gate
         self.mlp = nn.Sequential(
             nn.Linear(self.activity_dim, channels),
-            nn.Dropout(dropout),
             nn.GELU(),
             nn.LayerNorm(channels),
-            nn.Linear(channels, 1),
+            nn.Linear(channels, out_dim),
         )
+
+    def get_alpha_mean(self):
+        if hasattr(self, 'store_alpha_mean'):
+            return self.store_alpha_mean
+        else:
+            raise ValueError("Alpha mean not stored. Please run forward pass first.")
 
     def forward(self, x: torch.Tensor):
         """Infer the node attention/activity.
@@ -88,10 +104,19 @@ class NodeActivity(torch.nn.Module):
                 f"Expected x with activity_dim={self.activity_dim}, got {F}."
             )
 
-        logits = self.mlp(x).squeeze(-1)                                       # (B, Nf)
-        alpha = (logits / self.temperature).sigmoid()                          # (B, Nf)
+        logits = self.mlp(x)                                     # (B, Nf, 1) or (B, Nf, C_pn)
+        alpha = (logits / self.temperature).sigmoid()            # (B, Nf, 1) or (B, Nf, C_pn)
+        self.store_alpha_mean = alpha.mean(dim=0)
 
-        alpha_per_channel = alpha.unsqueeze(-1).expand(-1, -1, self.channels_per_node)  # (B, Nf, C_pn)
-        alpha_per_channel = alpha_per_channel.reshape(B, self.Ncg)                      # (B, Nf * C_pn)
+        # dropout nodes to zero 
+        alpha = self.dropout(alpha)
+
+        if self.mode == 'per-node':
+            alpha_per_channel = alpha.expand(-1, -1, self.channels_per_node)  # (B, Nf, C_pn)
+            alpha_per_channel = alpha_per_channel.reshape(B, self.Ncg)        # (B, Nf * C_pn)
+        elif self.mode == 'per-channel':
+            alpha_per_channel = alpha.reshape(B, self.Ncg)            # (B, Nf * C_pn)
+        else:
+            raise ValueError(f"Invalid mode: {self.mode}. Must be 'per-node' or 'per-channel'.")
 
         return alpha_per_channel

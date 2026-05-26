@@ -5,6 +5,13 @@ import numpy as np
 import pandas as pd
 import torch
 
+from gsnn.interpret._kwargs_utils import (
+    concat_pair,
+    normalize_model_kwargs,
+    repeat_batch,
+    slice_per_sample,
+)
+
 
 class ContrastiveIGExplainer:
     r"""Edge-level Integrated-Gradients explainer for *contrastive* questions.
@@ -92,6 +99,8 @@ class ContrastiveIGExplainer:
         element_mask=None,
         target: str = 'edge',
         reduction: str = 'mean',
+        model_kwargs1=None,
+        model_kwargs2=None,
     ) -> pd.DataFrame:
         """Compute attributions for *f(x₁) − f(x₂)*.
 
@@ -138,9 +147,11 @@ class ContrastiveIGExplainer:
             raise ValueError(f"reduction must be 'mean', 'sum', or 'none', got '{reduction}'")
 
         if target == 'edge':
-            return self._compute_edge_attributions(x1, x2, target_idx, jitter, element_mask, reduction)
+            return self._compute_edge_attributions(x1, x2, target_idx, jitter, element_mask, reduction,
+                                                   model_kwargs1=model_kwargs1, model_kwargs2=model_kwargs2)
         else:
-            return self._compute_node_attributions(x1, x2, target_idx, jitter, element_mask, reduction)
+            return self._compute_node_attributions(x1, x2, target_idx, jitter, element_mask, reduction,
+                                                   model_kwargs1=model_kwargs1, model_kwargs2=model_kwargs2)
 
     def _compute_edge_attributions(
         self,
@@ -150,8 +161,13 @@ class ContrastiveIGExplainer:
         jitter: Optional[torch.Tensor] = None,
         element_mask=None,
         reduction: str = 'mean',
+        model_kwargs1=None,
+        model_kwargs2=None,
     ) -> pd.DataFrame:
         """Compute edge-level attributions for *f(x₁) − f(x₂)*."""
+        mk1 = normalize_model_kwargs(model_kwargs1)
+        mk2 = normalize_model_kwargs(model_kwargs2)
+
         x1, x2 = x1.to(self.device), x2.to(self.device)
         
         # Ensure batch dimension
@@ -223,8 +239,14 @@ class ContrastiveIGExplainer:
             x_batch = torch.cat([x1_batch, x2_batch], dim=0)  # (2T , N_in)
             mask_batch = mask_path.repeat(2, 1)  # (2T , E)
 
+            # Per-side model_kwargs (e.g. x_fn): pick this sample's row, repeat
+            # across T path points, then concat to match x_batch (2T entries).
+            mk1_i_T = repeat_batch(slice_per_sample(mk1, sample_idx), T)
+            mk2_i_T = repeat_batch(slice_per_sample(mk2, sample_idx), T)
+            mk_joint = concat_pair(mk1_i_T, mk2_i_T)
+
             # Forward pass
-            preds = self.model(x_batch, edge_mask=mask_batch)[:, target_idx]  # (2T , |T|)
+            preds = self.model(x_batch, edge_mask=mask_batch, **mk_joint)[:, target_idx]  # (2T , |T|)
             preds = preds.sum(dim=1)  # (2T ,)
 
             preds_x1 = preds[:T]
@@ -290,8 +312,13 @@ class ContrastiveIGExplainer:
         jitter: Optional[torch.Tensor] = None,
         element_mask=None,
         reduction: str = 'mean',
+        model_kwargs1=None,
+        model_kwargs2=None,
     ) -> pd.DataFrame:
         """Compute node-level attributions for *f(x₁) − f(x₂)*."""
+        mk1 = normalize_model_kwargs(model_kwargs1)
+        mk2 = normalize_model_kwargs(model_kwargs2)
+
         x1, x2 = x1.to(self.device), x2.to(self.device)
         
         # Ensure batch dimension
@@ -364,8 +391,14 @@ class ContrastiveIGExplainer:
             x_batch = torch.cat([x1_batch, x2_batch], dim=0)  # (2T , N_in)
             mask_batch = mask_path.repeat(2, 1)  # (2T , N)
 
+            # Per-side model_kwargs (e.g. x_fn): pick this sample's row, repeat
+            # across T path points, then concat to match x_batch (2T entries).
+            mk1_i_T = repeat_batch(slice_per_sample(mk1, sample_idx), T)
+            mk2_i_T = repeat_batch(slice_per_sample(mk2, sample_idx), T)
+            mk_joint = concat_pair(mk1_i_T, mk2_i_T)
+
             # Forward pass
-            preds = self.model(x_batch, node_mask=mask_batch)[:, target_idx]  # (2T , |T|)
+            preds = self.model(x_batch, node_mask=mask_batch, **mk_joint)[:, target_idx]  # (2T , |T|)
             preds = preds.sum(dim=1)  # (2T ,)
 
             preds_x1 = preds[:T]

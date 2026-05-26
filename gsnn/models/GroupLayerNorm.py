@@ -33,6 +33,8 @@ class GroupLayerNorm(torch.nn.Module):
         """Normalize ``x`` with shape ``(B, C, 1)`` or squeezed ``(B, C)``; returns ``(B, C, 1)``."""
 
         x = x.squeeze(-1)
+
+        mean = pyg.utils.scatter(x, self.channel_groups, dim=1, reduce='mean')
         std = (pyg.utils.scatter((x - mean[:, self.channel_groups])**2, self.channel_groups, dim=1, reduce='sum') / (self.n_channels-1))**0.5
         mean = mean.detach()
         std = std.detach()    # BUG: introduces nan's after first gradient update if not detached 
