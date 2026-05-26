@@ -742,6 +742,9 @@ class ResBlock(torch.nn.Module):
         if node_err is not None:
             out = out + node_err.unsqueeze(-1)  
         ############################
+
+        if self._store_activations:
+            self._last_pre_norm_activation = out
         
         out = apply_norm_and_nonlin(self.norm, self.nonlin, out, self.norm_first)
 

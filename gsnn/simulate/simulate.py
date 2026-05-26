@@ -132,9 +132,14 @@ def simulate_sde(G, n_train: int, n_test: int, input_nodes, output_nodes, *,
     
     if seed is not None:
         np.random.seed(seed)
-    
-    # Get all nodes and create mapping to indices
-    all_nodes = list(nx.topological_sort(G))
+
+    # Use topological order when possible, otherwise fall back to G.nodes order.
+    # SDE integration only needs a consistent indexing of nodes — the dynamics
+    # `dydt = -y + f(y)` are evaluated simultaneously per step, so cycles are OK.
+    try:
+        all_nodes = list(nx.topological_sort(G))
+    except nx.NetworkXUnfeasible:
+        all_nodes = list(G.nodes())
     node_to_idx = {node: i for i, node in enumerate(all_nodes)}
     n_nodes = len(all_nodes)
     
