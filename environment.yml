@@ -1,5 +1,3 @@
-# primary environment 
-
 name: gsnn
 
 channels: 
@@ -11,8 +9,8 @@ channels:
 dependencies:
     - python
     - matplotlib
-    - pyg
-    - pytorch
+    - pyg::pyg
+    - pytorch::pytorch
     - seaborn
     - scikit-learn
     - h5py
@@ -25,8 +23,5 @@ dependencies:
         - tensorboardX
         - ipykernel
         - umap-learn
-        - torch-sparse 
-        - torch-scatter
-        - torch-cluster
         - pytest
         - ax-platform

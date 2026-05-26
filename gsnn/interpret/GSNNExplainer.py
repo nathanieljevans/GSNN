@@ -56,6 +56,12 @@ class GSNNExplainer:
         Coefficient of the sparsity term.
     entropy : float, optional (default=0.0)
         Strength of the entropy bonus (encourages exploration).
+    scale_mse_by_variance : bool, optional (default=True)
+        If True, normalise the MSE term by ``Var(target_preds)`` so that the
+        fidelity loss is scale-invariant across samples (an ``1 - R²`` style
+        objective).  This makes ``beta`` interpretable across samples with
+        very different prediction magnitudes.  Falls back to plain MSE when
+        the target has fewer than 2 elements.
 
     Example
     -------
@@ -70,7 +76,8 @@ class GSNNExplainer:
 
     def __init__(self, model, data, ignore_cuda=False, gumbel_softmax=True, hard=False, tau0=3, min_tau=0.5, 
                             prior=1, iters=250, lr=1e-2, weight_decay=1e-5, free_edges=0, grad_norm_clip=0,
-                                    beta=1, verbose=True, optimizer=torch.optim.Adam, entropy=0): 
+                                    beta=1, verbose=True, optimizer=torch.optim.Adam, entropy=0,
+                                    scale_mse_by_variance=True): 
         '''
         Adapted from the methods presented in `GNNExplainer` (https://arxiv.org/abs/1903.03894). 
 
@@ -91,6 +98,7 @@ class GSNNExplainer:
             lr              float                       learning rate for the optimiser
             weight_decay    float                       weight decay for the optimiser
             free_edges      int                         number of edges allowed before the sparsity penalty activates
+            scale_mse_by_variance  bool                 if True, divide the MSE loss by Var(target_preds) so the fidelity term is scale-invariant across samples
 
         Returns 
             None 
@@ -111,6 +119,7 @@ class GSNNExplainer:
         self.data = data
         self.device = 'cuda' if (torch.cuda.is_available() and not ignore_cuda) else 'cpu'
         self.entropy = entropy
+        self.scale_mse_by_variance = scale_mse_by_variance
 
         model = copy.deepcopy(model)
         model = model.eval()
@@ -122,7 +131,7 @@ class GSNNExplainer:
 
         self.model = model
 
-    def explain(self, x, target_idx=None, return_weights=False, target='edge'): 
+    def explain(self, x, target_idx=None, return_weights=False, target='edge', model_kwargs=None): 
         '''
         Initializes and runs gradient descent to select a minimal subset of edges or nodes that produce comparable predictions 
         to the full graph. 
@@ -137,6 +146,10 @@ class GSNNExplainer:
             Whether to return raw weights along with the DataFrame.
         target : str, optional (default='edge')
             Whether to return 'edge' or 'node' level attributions.
+        model_kwargs : dict, optional (default=None)
+            Extra keyword arguments forwarded to every ``self.model(...)`` call
+            (e.g. ``{'x_fn': x_fn}`` for models trained with ``node_activity=True``).
+            ``edge_mask`` / ``node_mask`` are reserved and should not be included.
 
         Returns 
         -------
@@ -149,11 +162,11 @@ class GSNNExplainer:
             raise ValueError(f"target must be 'edge' or 'node', got '{target}'")
 
         if target == 'edge':
-            return self._explain_edges(x, target_idx, return_weights)
+            return self._explain_edges(x, target_idx, return_weights, model_kwargs=model_kwargs)
         elif target == 'node':
-            return self._explain_nodes(x, target_idx, return_weights)
+            return self._explain_nodes(x, target_idx, return_weights, model_kwargs=model_kwargs)
 
-    def _explain_edges(self, x, targets=None, return_weights=False):
+    def _explain_edges(self, x, targets=None, return_weights=False, model_kwargs=None):
         '''
         Compute edge-level attributions using gradient descent optimization.
         
@@ -165,6 +178,8 @@ class GSNNExplainer:
             Target output indices to explain.
         return_weights : bool, optional (default=False)
             Whether to return raw weights along with the DataFrame.
+        model_kwargs : dict, optional (default=None)
+            Extra keyword arguments forwarded to every ``self.model(...)`` call.
             
         Returns
         -------
@@ -172,6 +187,8 @@ class GSNNExplainer:
             Columns ['source', 'target', 'score'] for edge attributions.
         '''
         
+        model_kwargs = {} if model_kwargs is None else dict(model_kwargs)
+
         weights = torch.stack((self.prior*torch.ones(self.model.edge_index.size(1), dtype=torch.float32, device=self.device, requires_grad=True), 
                                 -self.prior*torch.ones(self.model.edge_index.size(1), dtype=torch.float32, device=self.device, requires_grad=True)), dim=0)
 
@@ -186,10 +203,12 @@ class GSNNExplainer:
 
         # get target predictions 
         with torch.no_grad():
-            target_preds = self.model(x)
+            target_preds = self.model(x, **model_kwargs)
 
         if targets is not None: 
             target_preds = target_preds[:, targets]
+
+        target_var = target_preds.var().detach() if (self.scale_mse_by_variance and target_preds.numel() > 1) else None
 
         for iter in range(self.iters):    
             optim.zero_grad()
@@ -198,12 +217,14 @@ class GSNNExplainer:
 
             edge_weight, _ = torch.nn.functional.gumbel_softmax(edge_params, dim=0, hard=self.hard, tau=tau)
 
-            out = self.model(x, edge_mask=edge_weight.view(1, -1))
+            out = self.model(x, edge_mask=edge_weight.view(1, -1), **model_kwargs)
 
             if targets is not None: 
                 out = out[:, targets]
 
             mse = crit(out, target_preds)
+            if target_var is not None:
+                mse = mse / (target_var + 1e-8)
 
             edge_probs, _ = torch.nn.functional.softmax(edge_params, dim=0)
             m = torch.distributions.Bernoulli(probs=edge_probs)
@@ -216,15 +237,15 @@ class GSNNExplainer:
             loss.backward() 
 
             if self.grad_norm_clip > 0:
-                torch.nn.utils.clip_grad_norm_(edge_params.grad, self.grad_norm_clip)
+                torch.nn.utils.clip_grad_norm_([edge_params], self.grad_norm_clip)
 
             optim.step() 
 
             with torch.no_grad():
-                if out.view(-1).shape[0] == 1:
-                    r2 = -666 
-                else: 
-                    r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), out.detach().cpu().numpy().ravel())
+                r2 = r2_score(
+                    target_preds.detach().cpu().numpy().ravel(),
+                    out.detach().cpu().numpy().ravel(),
+                ) if out.numel() > 1 else -666
 
             if self.verbose: 
                 print(f'iter: {iter} | loss: {loss.item():.4f} | mse: {mse.item():.4f} | r2: {r2:.3f} | active edges: {(edge_weight > 0.5).sum().item()} / {self.model.edge_index.size(1)} | entropy: {ent.item():.4f}', end='\r')
@@ -238,31 +259,25 @@ class GSNNExplainer:
                 subset_mask = (final_edge_probs > 0.5).float()
                 
                 # Evaluate performance using only edges > 0.5
-                subset_out = self.model(x, edge_mask=subset_mask.view(1, -1))
+                subset_out = self.model(x, edge_mask=subset_mask.view(1, -1), **model_kwargs)
                 if targets is not None:
                     subset_out = subset_out[:, targets]
                 
                 subset_mse = torch.nn.functional.mse_loss(subset_out, target_preds).item()
-                subset_r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), 
-                                   subset_out.detach().cpu().numpy().ravel())
-                
-                # Calculate variance explained (R2 can be negative, so we also show raw correlation)
-                target_flat = target_preds.detach().cpu().numpy().ravel()
-                pred_flat = subset_out.detach().cpu().numpy().ravel()
-                correlation = np.corrcoef(target_flat, pred_flat)[0, 1]
-                variance_explained = correlation ** 2 if not np.isnan(correlation) else 0.0
-                
+                subset_r2 = r2_score(
+                    target_preds.detach().cpu().numpy().ravel(),
+                    subset_out.detach().cpu().numpy().ravel(),
+                ) if target_preds.numel() > 1 else -666
+
                 num_selected_edges = (subset_mask > 0.5).sum().item()
                 total_edges = len(subset_mask)
-                
+
                 print("="*50)
                 print("POST-TRAINING EVALUATION (edges > 0.5)")
                 print("="*50)
                 print(f"Selected edges: {num_selected_edges} / {total_edges} ({100*num_selected_edges/total_edges:.1f}%)")
                 print(f"MSE (subset): {subset_mse:.6f}")
                 print(f"R² (subset): {subset_r2:.4f}")
-                print(f"Variance explained: {variance_explained:.4f}")
-                print(f"Correlation: {correlation:.4f}")
                 print("="*50)
 
         edge_scores, _ = torch.nn.functional.softmax(edge_params.data, dim=0).detach().cpu().numpy()
@@ -275,7 +290,7 @@ class GSNNExplainer:
         else:
             return edgedf
 
-    def _explain_nodes(self, x, targets=None, return_weights=False):
+    def _explain_nodes(self, x, targets=None, return_weights=False, model_kwargs=None):
         '''
         Compute node-level attributions using gradient descent optimization.
         
@@ -287,6 +302,8 @@ class GSNNExplainer:
             Target output indices to explain.
         return_weights : bool, optional (default=False)
             Whether to return raw weights along with the DataFrame.
+        model_kwargs : dict, optional (default=None)
+            Extra keyword arguments forwarded to every ``self.model(...)`` call.
             
         Returns
         -------
@@ -294,6 +311,8 @@ class GSNNExplainer:
             Columns ['node', 'score'] for node attributions.
         '''
         
+        model_kwargs = {} if model_kwargs is None else dict(model_kwargs)
+
         weights = torch.stack((self.prior*torch.ones(self.model.num_nodes, dtype=torch.float32, device=self.device, requires_grad=True), 
                                 -self.prior*torch.ones(self.model.num_nodes, dtype=torch.float32, device=self.device, requires_grad=True)), dim=0)
 
@@ -308,9 +327,11 @@ class GSNNExplainer:
 
         # get target predictions 
         with torch.no_grad():
-            target_preds = self.model(x)
+            target_preds = self.model(x, **model_kwargs)
         if targets is not None: 
             target_preds = target_preds[:, targets]
+
+        target_var = target_preds.var().detach() if (self.scale_mse_by_variance and target_preds.numel() > 1) else None
 
         for iter in range(self.iters):    
             optim.zero_grad()
@@ -319,12 +340,14 @@ class GSNNExplainer:
 
             node_weight, _ = torch.nn.functional.gumbel_softmax(node_params, dim=0, hard=self.hard, tau=tau)
 
-            out = self.model(x, node_mask=node_weight.view(1, -1))
+            out = self.model(x, node_mask=node_weight.view(1, -1), **model_kwargs)
 
             if targets is not None: 
                 out = out[:, targets]
 
             mse = crit(out, target_preds)
+            if target_var is not None:
+                mse = mse / (target_var + 1e-8)
 
             node_probs, _ = torch.nn.functional.softmax(node_params, dim=0)
             m = torch.distributions.Bernoulli(probs=node_probs)
@@ -335,10 +358,17 @@ class GSNNExplainer:
                 - self.entropy*ent
 
             loss.backward() 
+
+            if self.grad_norm_clip > 0:
+                torch.nn.utils.clip_grad_norm_([node_params], self.grad_norm_clip)
+
             optim.step() 
 
             with torch.no_grad():
-                r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), out.detach().cpu().numpy().ravel())
+                r2 = r2_score(
+                    target_preds.detach().cpu().numpy().ravel(),
+                    out.detach().cpu().numpy().ravel(),
+                ) if out.numel() > 1 else -666
 
             if self.verbose: 
                 print(f'iter: {iter} | loss: {loss.item():.4f} | mse: {mse.item():.4f} | r2: {r2:.3f} | active nodes: {(node_weight > 0.5).sum().item()} / {self.model.num_nodes} | entropy: {ent.item():.4f}', end='\r')
@@ -352,31 +382,25 @@ class GSNNExplainer:
                 subset_mask = (final_node_probs > 0.5).float()
                 
                 # Evaluate performance using only nodes > 0.5
-                subset_out = self.model(x, node_mask=subset_mask.view(1, -1))
+                subset_out = self.model(x, node_mask=subset_mask.view(1, -1), **model_kwargs)
                 if targets is not None:
                     subset_out = subset_out[:, targets]
                 
                 subset_mse = torch.nn.functional.mse_loss(subset_out, target_preds).item()
-                subset_r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), 
-                                   subset_out.detach().cpu().numpy().ravel())
-                
-                # Calculate variance explained (R2 can be negative, so we also show raw correlation)
-                target_flat = target_preds.detach().cpu().numpy().ravel()
-                pred_flat = subset_out.detach().cpu().numpy().ravel()
-                correlation = np.corrcoef(target_flat, pred_flat)[0, 1]
-                variance_explained = correlation ** 2 if not np.isnan(correlation) else 0.0
-                
+                subset_r2 = r2_score(
+                    target_preds.detach().cpu().numpy().ravel(),
+                    subset_out.detach().cpu().numpy().ravel(),
+                ) if target_preds.numel() > 1 else -666
+
                 num_selected_nodes = (subset_mask > 0.5).sum().item()
                 total_nodes = len(subset_mask)
-                
+
                 print("="*50)
                 print("POST-TRAINING EVALUATION (nodes > 0.5)")
                 print("="*50)
                 print(f"Selected nodes: {num_selected_nodes} / {total_nodes} ({100*num_selected_nodes/total_nodes:.1f}%)")
                 print(f"MSE (subset): {subset_mse:.6f}")
                 print(f"R² (subset): {subset_r2:.4f}")
-                print(f"Variance explained: {variance_explained:.4f}")
-                print(f"Correlation: {correlation:.4f}")
                 print("="*50)
 
         node_scores, _ = torch.nn.functional.softmax(node_params.data, dim=0).detach().cpu().numpy()
@@ -460,7 +484,8 @@ class GSNNExplainer:
             'min_tau': self.min_tau,
             'hard': self.hard,
             'entropy': self.entropy,
-            'verbose': self.verbose
+            'verbose': self.verbose,
+            'scale_mse_by_variance': self.scale_mse_by_variance
         }
         
         # Apply parameter overrides
@@ -493,6 +518,8 @@ class GSNNExplainer:
                     target_preds = self.model(x)
                     if target_ixs is not None: 
                         target_preds = target_preds[:, target_ixs]
+
+                target_var = target_preds.var().detach() if (self.scale_mse_by_variance and target_preds.numel() > 1) else None
                 
                 # Run training
                 for iter in range(self.iters):
@@ -504,6 +531,8 @@ class GSNNExplainer:
                         out = out[:, target_ixs]
                     
                     mse = crit(out, target_preds)
+                    if target_var is not None:
+                        mse = mse / (target_var + 1e-8)
                     probs, _ = torch.nn.functional.softmax(params, dim=0)
                     m = torch.distributions.Bernoulli(probs=probs)
                     ent = m.entropy().mean()
@@ -514,7 +543,10 @@ class GSNNExplainer:
                     
                     if tuning_verbose and iter % 50 == 0:
                         with torch.no_grad():
-                            r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), out.detach().cpu().numpy().ravel())
+                            r2 = r2_score(
+                                target_preds.detach().cpu().numpy().ravel(),
+                                out.detach().cpu().numpy().ravel(),
+                            ) if out.numel() > 1 else -666
                         print(f'    iter: {iter} | loss: {loss.item():.4f} | r2: {r2:.3f} | beta: {beta_val:.4f}')
                 
                 # Evaluate final performance on subset
@@ -525,8 +557,10 @@ class GSNNExplainer:
                     if target_ixs is not None:
                         subset_out = subset_out[:, target_ixs]
                     
-                    subset_r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), 
-                                       subset_out.detach().cpu().numpy().ravel())
+                    subset_r2 = r2_score(
+                        target_preds.detach().cpu().numpy().ravel(),
+                        subset_out.detach().cpu().numpy().ravel(),
+                    ) if target_preds.numel() > 1 else -666
                     num_elements = (subset_mask > 0.5).sum().item()
             
             else:  # target == 'node'
@@ -546,6 +580,8 @@ class GSNNExplainer:
                     target_preds = self.model(x)
                     if target_ixs is not None: 
                         target_preds = target_preds[:, target_ixs]
+
+                target_var = target_preds.var().detach() if (self.scale_mse_by_variance and target_preds.numel() > 1) else None
                 
                 # Run training
                 for iter in range(self.iters):
@@ -557,6 +593,8 @@ class GSNNExplainer:
                         out = out[:, target_ixs]
                     
                     mse = crit(out, target_preds)
+                    if target_var is not None:
+                        mse = mse / (target_var + 1e-8)
                     probs, _ = torch.nn.functional.softmax(params, dim=0)
                     m = torch.distributions.Bernoulli(probs=probs)
                     ent = m.entropy().mean()
@@ -567,7 +605,10 @@ class GSNNExplainer:
                     
                     if tuning_verbose and iter % 50 == 0:
                         with torch.no_grad():
-                            r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), out.detach().cpu().numpy().ravel())
+                            r2 = r2_score(
+                                target_preds.detach().cpu().numpy().ravel(),
+                                out.detach().cpu().numpy().ravel(),
+                            ) if out.numel() > 1 else -666
                         print(f'    iter: {iter} | loss: {loss.item():.4f} | r2: {r2:.3f} | beta: {beta_val:.4f}')
                 
                 # Evaluate final performance on subset
@@ -578,8 +619,10 @@ class GSNNExplainer:
                     if target_ixs is not None:
                         subset_out = subset_out[:, target_ixs]
                     
-                    subset_r2 = r2_score(target_preds.detach().cpu().numpy().ravel(), 
-                                       subset_out.detach().cpu().numpy().ravel())
+                    subset_r2 = r2_score(
+                        target_preds.detach().cpu().numpy().ravel(),
+                        subset_out.detach().cpu().numpy().ravel(),
+                    ) if target_preds.numel() > 1 else -666
                     num_elements = (subset_mask > 0.5).sum().item()
                 
             return subset_r2, num_elements, params

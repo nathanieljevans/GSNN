@@ -4,6 +4,12 @@ import copy
 import pandas as pd
 from typing import Optional
 
+from gsnn.interpret._kwargs_utils import (
+    normalize_model_kwargs,
+    repeat_batch,
+    slice_per_sample,
+)
+
 
 class IGExplainer:
     r"""Integrated-Gradients explainer for GSNN models (non-contrastive).
@@ -74,7 +80,7 @@ class IGExplainer:
         self.baseline = torch.zeros((1, self.E), device=self.device) if baseline is None else baseline.to(self.device)
         
 
-    def explain(self, x, target_idx, *, jitter: Optional[torch.Tensor] = None, element_mask=None, target='edge', reduction='mean'):
+    def explain(self, x, target_idx, *, jitter: Optional[torch.Tensor] = None, element_mask=None, target='edge', reduction='mean', model_kwargs=None):
         '''
         Compute integrated gradients attributions for GSNN predictions.
 
@@ -105,6 +111,13 @@ class IGExplainer:
             - 'mean': average attributions across samples (default)
             - 'sum': sum attributions across samples
             - 'none': return all per-sample attributions (adds 'sample_idx' column)
+        model_kwargs : dict, optional (default=None)
+            Extra keyword arguments forwarded to every ``self.model(...)`` call
+            (e.g. ``{'x_fn': x_fn}`` for models trained with ``node_activity=True``).
+            Tensor values must have leading dim equal to ``x.shape[0]`` (or 1
+            to broadcast); they will be sliced per sample and replicated to
+            ``n_steps+1`` along the IG path. ``edge_mask`` / ``node_mask`` are
+            reserved and should not be included.
 
         Returns
         -------
@@ -140,11 +153,11 @@ class IGExplainer:
             raise ValueError(f"reduction must be 'mean', 'sum', or 'none', got '{reduction}'")
 
         if target == 'edge':
-            return self._compute_edge_attributions(x, target_idx, jitter, element_mask, reduction)
+            return self._compute_edge_attributions(x, target_idx, jitter, element_mask, reduction, model_kwargs=model_kwargs)
         else:
-            return self._compute_node_attributions(x, target_idx, jitter, element_mask, reduction)
+            return self._compute_node_attributions(x, target_idx, jitter, element_mask, reduction, model_kwargs=model_kwargs)
 
-    def _compute_edge_attributions(self, x, target_idx, jitter=None, element_mask=None, reduction='mean'):
+    def _compute_edge_attributions(self, x, target_idx, jitter=None, element_mask=None, reduction='mean', model_kwargs=None):
         '''
         Compute edge-level attributions using integrated gradients on edge_mask.
         
@@ -167,6 +180,8 @@ class IGExplainer:
             Columns ['source', 'target', 'score'] for edge attributions.
             If reduction='none': additional 'sample_idx' column.
         '''
+        model_kwargs = normalize_model_kwargs(model_kwargs)
+
         x = x.to(self.device)
         if x.dim() == 1:
             x = x.unsqueeze(0)  # (1, N_in)
@@ -225,7 +240,10 @@ class IGExplainer:
             edge_masks = edge_masks_template.clone().requires_grad_(True)
             
             x_batch = xi.repeat(self.n_steps + 1, 1)  # (n_steps+1 , N_in)
-            preds = self.model(x_batch, edge_mask=edge_masks)[:, target_idx]  # (n_steps+1,)
+            # Replicate any per-sample model_kwargs (e.g. x_fn) across the
+            # n_steps+1 IG path so the model sees one entry per replicated x.
+            mk_i = repeat_batch(slice_per_sample(model_kwargs, i), self.n_steps + 1)
+            preds = self.model(x_batch, edge_mask=edge_masks, **mk_i)[:, target_idx]  # (n_steps+1,)
 
             # d(pred)/d(edge_mask)
             grads = torch.autograd.grad(preds.sum(), edge_masks)[0]  # (n_steps+1 , E)
@@ -279,7 +297,7 @@ class IGExplainer:
             'score': scores
         })
 
-    def _compute_node_attributions(self, x, target_idx, jitter=None, element_mask=None, reduction='mean'):
+    def _compute_node_attributions(self, x, target_idx, jitter=None, element_mask=None, reduction='mean', model_kwargs=None):
         '''
         Compute node-level attributions using integrated gradients on node_mask.
         
@@ -302,6 +320,8 @@ class IGExplainer:
             Columns ['node', 'score'] for node attributions.
             If reduction='none': additional 'sample_idx' column.
         '''
+        model_kwargs = normalize_model_kwargs(model_kwargs)
+
         x = x.to(self.device)
         if x.dim() == 1:
             x = x.unsqueeze(0)  # (1, N_in)
@@ -361,7 +381,8 @@ class IGExplainer:
             node_masks = node_masks_template.clone().requires_grad_(True)
             
             x_batch = xi.repeat(self.n_steps + 1, 1)  # (n_steps+1 , N_in)
-            preds = self.model(x_batch, node_mask=node_masks)[:, target_idx]  # (n_steps+1,)
+            mk_i = repeat_batch(slice_per_sample(model_kwargs, i), self.n_steps + 1)
+            preds = self.model(x_batch, node_mask=node_masks, **mk_i)[:, target_idx]  # (n_steps+1,)
 
             # d(pred)/d(node_mask)
             grads = torch.autograd.grad(preds.sum(), node_masks)[0]  # (n_steps+1 , N)

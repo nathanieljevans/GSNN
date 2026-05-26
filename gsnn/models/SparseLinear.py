@@ -7,11 +7,13 @@ import torch_geometric as pyg
 
 
 class Conv(pyg.nn.MessagePassing):
+    """Message-passing layer for one bipartite sparse matmul step (neighbor sum + edge weights)."""
+
     def __init__(self):
         super().__init__(aggr='add')
 
     def forward(self, x, edge_index, edge_weight, bias, size):
-        
+        """Aggregate weighted neighbor features into destination nodes."""
         out = self.propagate(edge_index, x=x, edge_weight=edge_weight, size=size).view(-1, 1)
         
         if bias is not None: out = out + bias.view(-1, 1)
@@ -19,6 +21,7 @@ class Conv(pyg.nn.MessagePassing):
         return out 
 
     def message(self, x_j, edge_weight):
+        """Per-edge contribution: source feature times edge weight."""
         return edge_weight.view(-1, 1) * x_j.view(-1, 1)
 
 
@@ -47,35 +50,40 @@ def batch_graphs(N, M, edge_index, B, device):
 
     return batched_edge_indices
 
-def xavier_uniform(size, fan_in, fan_out, gain=1, dtype=torch.float32): 
+def xavier_uniform(size, fan_in, fan_out, gain=1, dtype=torch.float32):
+    """Xavier/Glorot uniform init scaled by fan-in and fan-out (uses PyTorch uniform then scales)."""
     a = gain * torch.sqrt((6/(fan_in + fan_out)))
     out = torch.empty(size, dtype=dtype)
     out = torch.nn.init.uniform_(out, a=-1, b=1) 
     out = out * a 
     return out 
 
-def xavier_normal(size, fan_in, fan_out, gain=1, dtype=torch.float32): 
+def xavier_normal(size, fan_in, fan_out, gain=1, dtype=torch.float32):
+    """Xavier/Glorot normal init scaled by fan-in and fan-out."""
     a = gain * torch.sqrt((2/(fan_in + fan_out)))
     out = torch.empty(size, dtype=dtype)
     out = torch.nn.init.normal_(out, mean=0, std=1) 
     out = out * a 
     return out 
 
-def uniform(size, gain=1., dtype=torch.float32): 
+def uniform(size, gain=1., dtype=torch.float32):
+    """Uniform init on [-1, 1] then scaled by ``gain``."""
     a = gain 
     out = torch.empty(size, dtype=dtype)
     out = torch.nn.init.uniform_(out, a=-1, b=1) 
     out = out * a 
     return out 
 
-def normal(size, gain=1, dtype=torch.float32): 
+def normal(size, gain=1, dtype=torch.float32):
+    """Standard normal init then scaled by ``gain``."""
     a = gain
     out = torch.empty(size, dtype=dtype)
     out = torch.nn.init.normal_(out, mean=0, std=1) 
     out = out * a 
     return out 
 
-def kaiming_uniform(size, fan_in, fan_out, fan_mode='fan_in', gain=1, dtype=torch.float32): 
+def kaiming_uniform(size, fan_in, fan_out, fan_mode='fan_in', gain=1, dtype=torch.float32):
+    """Kaiming/He uniform init (fan-in or fan-out)."""
     fan_val = fan_in if fan_mode == 'fan_in' else fan_out
     a = gain * torch.sqrt( 3 / fan_val )
     out = torch.empty(size, dtype=dtype)
@@ -83,7 +91,8 @@ def kaiming_uniform(size, fan_in, fan_out, fan_mode='fan_in', gain=1, dtype=torc
     out = out * a 
     return out  
 
-def kaiming_normal(size, fan_in, fan_out, fan_mode='fan_in', gain=1, dtype=torch.float32): 
+def kaiming_normal(size, fan_in, fan_out, fan_mode='fan_in', gain=1, dtype=torch.float32):
+    """Kaiming/He normal init (fan-in or fan-out)."""
     fan_val = fan_in if fan_mode == 'fan_in' else fan_out
     a = gain / torch.sqrt( fan_val )
     out = torch.empty(size, dtype=dtype)
@@ -92,20 +101,20 @@ def kaiming_normal(size, fan_in, fan_out, fan_mode='fan_in', gain=1, dtype=torch
     return out  
 
 
-class SparseLinear(torch.nn.Module): 
-    def __init__(self, indices, size, dtype=torch.float32, bias=True, init='kaiming', init_gain=1., degree_norm_eps=1e-8):
-        '''
-        Sparse Linear layer, equivalent to sparse matrix multiplication as provided by indices. 
+class SparseLinear(torch.nn.Module):
+    """Fixed sparsity pattern linear layer; forward is batched message passing on the COO indices."""
 
-        Args: 
-            indices         COO coordinates for the sparse matrix multiplication 
-            size            size of weight matrix 
-            dtype           weight matrix type 
-            bias            whether to include a bias term; Wx + B
-            init            weight initialization strategy 
-            init_gain       gain factor for initialization
-            degree_norm_eps small epsilon to prevent division by zero in degree normalization
-        '''
+    def __init__(self, indices, size, dtype=torch.float32, bias=True, init='kaiming', init_gain=1., degree_norm_eps=1e-8):
+        """
+        Args:
+            indices: COO ``(src, dst)`` for nonzeros of the weight matrix.
+            size: ``(N, M)`` shape of the dense view (first dim source / rows, second dest / cols).
+            dtype: Parameter dtype.
+            bias: If True, learn a bias per destination node.
+            init: Weight init scheme name (see implementation for options).
+            init_gain: Scalar gain for init.
+            degree_norm_eps: Epsilon for ``degree_normalized`` init.
+        """
         super().__init__() 
 
         self.N, self.M = size
@@ -188,8 +197,7 @@ class SparseLinear(torch.nn.Module):
         return x
 
     def prune(self, idxs):
-        """
-        """
+        """Keep only edges indexed by ``idxs``; drops corresponding weights and index columns."""
         self.values = torch.nn.Parameter(self.values[idxs])
         self.register_buffer('indices', self.indices[:, idxs])
 

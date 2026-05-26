@@ -1,21 +1,11 @@
 import torch
 
-class NN(torch.nn.Module): 
+class NN(torch.nn.Module):
+    """Fully-connected baseline: Linear blocks with optional norm, activation, dropout."""
 
-    def __init__(self, in_channels, hidden_channels, out_channels, layers=2, dropout=0, 
-                        nonlin=torch.nn.ELU, out=None, norm=torch.nn.LayerNorm): 
-        '''
-        
-        Args: 
-            in_channels             int                 number of input channels 
-            hidden_channels         int                 number of hidden channels per layer 
-            out_channels            int                 number of output channels 
-            layers                  int                 number of hidden layers 
-            dropout                 float               dropout regularization probability 
-            nonlin                  pytorch.module      non-linear activation function 
-            out                     pytorch.module      output transformation to be applied (default: None)
-            norm                    pytorch.module      normalization method to use 
-        '''
+    def __init__(self, in_channels, hidden_channels, out_channels, layers=2, dropout=0,
+                        nonlin=torch.nn.ELU, out=None, norm=torch.nn.LayerNorm):
+        """Build stack of linear layers; ``out`` is an optional module class after the last linear."""
         super().__init__()
         
         seq = [torch.nn.Linear(in_channels, hidden_channels)]
@@ -30,8 +20,8 @@ class NN(torch.nn.Module):
 
         self.nn = torch.nn.Sequential(*seq)
 
-    def forward(self, x): 
-
+    def forward(self, x):
+        """Flat features in, predictions out (shape depends on ``out_channels``)."""
         return self.nn(x)
 
         

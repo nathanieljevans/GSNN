@@ -2,11 +2,13 @@ import torch
 import torch_geometric as pyg
 
 class SoftmaxGroupNorm(torch.nn.Module):
+    """Channel-wise softmax normalized within each channel group (stable softmax via per-group max shift)."""
+
     def __init__(self, channel_groups, eps=1e-8):
         """
         Args:
-            channel_groups (tensor): Specifies which group each channel belongs to.
-            eps (float): A small value to avoid division by zero.
+            channel_groups: Length-``C`` index assigning each channel to a group.
+            eps: Added to the denominator for numerical stability.
         """
         super().__init__()
         
@@ -17,7 +19,7 @@ class SoftmaxGroupNorm(torch.nn.Module):
         self.eps = eps
         
     def forward(self, x):
-        # If input has a trailing singleton dimension (e.g. shape (B, C, 1)), remove it
+        """Input ``(B, C)`` or ``(B, C, 1)``; returns group-softmax-normalized activations."""
         if x.size(-1) == 1:
             x = x.squeeze(-1)
 

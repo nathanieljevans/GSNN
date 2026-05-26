@@ -5,6 +5,13 @@ import numpy as np
 import pandas as pd
 import torch
 
+from gsnn.interpret._kwargs_utils import (
+    concat_pair,
+    normalize_model_kwargs,
+    repeat_batch,
+    slice_per_sample,
+)
+
 
 class ContrastiveOcclusionExplainer:
     r"""Simple batched edge occlusion explainer for *contrastive* questions.
@@ -93,6 +100,8 @@ class ContrastiveOcclusionExplainer:
         element_mask=None,
         target: str = 'edge',
         reduction: str = 'mean',
+        model_kwargs1=None,
+        model_kwargs2=None,
     ) -> pd.DataFrame:
         """Compute occlusion attributions for *f(x₁) − f(x₂)*.
 
@@ -130,9 +139,11 @@ class ContrastiveOcclusionExplainer:
             raise ValueError(f"reduction must be 'mean', 'sum', or 'none', got '{reduction}'")
 
         if target == 'edge':
-            return self._compute_edge_attributions(x1, x2, target_idx, element_mask, reduction)
+            return self._compute_edge_attributions(x1, x2, target_idx, element_mask, reduction,
+                                                   model_kwargs1=model_kwargs1, model_kwargs2=model_kwargs2)
         else:
-            return self._compute_node_attributions(x1, x2, target_idx, element_mask, reduction)
+            return self._compute_node_attributions(x1, x2, target_idx, element_mask, reduction,
+                                                   model_kwargs1=model_kwargs1, model_kwargs2=model_kwargs2)
 
     def _compute_edge_attributions(
         self,
@@ -141,8 +152,13 @@ class ContrastiveOcclusionExplainer:
         target_idx: Union[int, List[int]],
         element_mask=None,
         reduction: str = 'mean',
+        model_kwargs1=None,
+        model_kwargs2=None,
     ) -> pd.DataFrame:
         """Compute edge-level occlusion attributions for *f(x₁) − f(x₂)*."""
+        mk1 = normalize_model_kwargs(model_kwargs1)
+        mk2 = normalize_model_kwargs(model_kwargs2)
+
         x1, x2 = x1.to(self.device), x2.to(self.device)
         
         # Ensure batch dimension
@@ -185,13 +201,18 @@ class ContrastiveOcclusionExplainer:
         for sample_idx in range(B):
             x1i = x1[sample_idx:sample_idx+1]  # (1, N_in)
             x2i = x2[sample_idx:sample_idx+1]  # (1, N_in)
-            
+
+            # Per-sample slices of model_kwargs (e.g. x_fn); shape (1, ...).
+            mk1_i = slice_per_sample(mk1, sample_idx)
+            mk2_i = slice_per_sample(mk2, sample_idx)
+
             if self.verbose and B > 1:
                 print(f"Processing sample {sample_idx + 1}/{B}")
 
             # Compute baseline difference (all edges present)
             baseline_mask = torch.ones((1, self.E), device=self.device)
-            baseline_diff = self._compute_diff_edge(x1i, x2i, target_idx, baseline_mask)
+            baseline_diff = self._compute_diff_edge(x1i, x2i, target_idx, baseline_mask,
+                                                    model_kwargs1=mk1_i, model_kwargs2=mk2_i)
             
             if self.verbose:
                 print(f"  Baseline |Δf| = {baseline_diff:.6f}")
@@ -221,8 +242,15 @@ class ContrastiveOcclusionExplainer:
                     x_batch = torch.cat([x1_batch, x2_batch], dim=0)
                     mask_batch = batch_masks.repeat(2, 1)
 
+                    # Per-side model_kwargs (e.g. x_fn): replicate this
+                    # sample's row across batch_size_actual perturbations and
+                    # concat so it matches x_batch (2*BB entries).
+                    mk1_rep = repeat_batch(mk1_i, batch_size_actual)
+                    mk2_rep = repeat_batch(mk2_i, batch_size_actual)
+                    mk_joint = concat_pair(mk1_rep, mk2_rep)
+
                     # Forward pass
-                    preds = self.model(x_batch, edge_mask=mask_batch)[:, target_idx].sum(dim=1)
+                    preds = self.model(x_batch, edge_mask=mask_batch, **mk_joint)[:, target_idx].sum(dim=1)
                     preds_x1 = preds[:batch_size_actual]
                     preds_x2 = preds[batch_size_actual:]
                     
@@ -280,8 +308,13 @@ class ContrastiveOcclusionExplainer:
         target_idx: Union[int, List[int]],
         element_mask=None,
         reduction: str = 'mean',
+        model_kwargs1=None,
+        model_kwargs2=None,
     ) -> pd.DataFrame:
         """Compute node-level occlusion attributions for *f(x₁) − f(x₂)*."""
+        mk1 = normalize_model_kwargs(model_kwargs1)
+        mk2 = normalize_model_kwargs(model_kwargs2)
+
         x1, x2 = x1.to(self.device), x2.to(self.device)
         
         # Ensure batch dimension
@@ -326,13 +359,17 @@ class ContrastiveOcclusionExplainer:
         for sample_idx in range(B):
             x1i = x1[sample_idx:sample_idx+1]  # (1, N_in)
             x2i = x2[sample_idx:sample_idx+1]  # (1, N_in)
-            
+
+            mk1_i = slice_per_sample(mk1, sample_idx)
+            mk2_i = slice_per_sample(mk2, sample_idx)
+
             if self.verbose and B > 1:
                 print(f"Processing sample {sample_idx + 1}/{B}")
 
             # Compute baseline difference (all nodes present)
             baseline_mask = torch.ones((1, N), device=self.device)
-            baseline_diff = self._compute_diff_node(x1i, x2i, target_idx, baseline_mask)
+            baseline_diff = self._compute_diff_node(x1i, x2i, target_idx, baseline_mask,
+                                                    model_kwargs1=mk1_i, model_kwargs2=mk2_i)
             
             if self.verbose:
                 print(f"  Baseline |Δf| = {baseline_diff:.6f}")
@@ -362,8 +399,12 @@ class ContrastiveOcclusionExplainer:
                     x_batch = torch.cat([x1_batch, x2_batch], dim=0)
                     mask_batch = batch_masks.repeat(2, 1)
 
+                    mk1_rep = repeat_batch(mk1_i, batch_size_actual)
+                    mk2_rep = repeat_batch(mk2_i, batch_size_actual)
+                    mk_joint = concat_pair(mk1_rep, mk2_rep)
+
                     # Forward pass
-                    preds = self.model(x_batch, node_mask=mask_batch)[:, target_idx].sum(dim=1)
+                    preds = self.model(x_batch, node_mask=mask_batch, **mk_joint)[:, target_idx].sum(dim=1)
                     preds_x1 = preds[:batch_size_actual]
                     preds_x2 = preds[batch_size_actual:]
                     
@@ -412,14 +453,20 @@ class ContrastiveOcclusionExplainer:
             "score": scores,
         })
 
-    def _compute_diff_edge(self, x1: torch.Tensor, x2: torch.Tensor, target_idx: List[int], mask: torch.Tensor) -> float:
+    def _compute_diff_edge(self, x1: torch.Tensor, x2: torch.Tensor, target_idx: List[int], mask: torch.Tensor,
+                           model_kwargs1=None, model_kwargs2=None) -> float:
         """Compute absolute prediction difference with given edge mask."""
-        pred1 = self.model(x1, edge_mask=mask)[:, target_idx].sum(dim=1)
-        pred2 = self.model(x2, edge_mask=mask)[:, target_idx].sum(dim=1)
+        mk1 = normalize_model_kwargs(model_kwargs1)
+        mk2 = normalize_model_kwargs(model_kwargs2)
+        pred1 = self.model(x1, edge_mask=mask, **mk1)[:, target_idx].sum(dim=1)
+        pred2 = self.model(x2, edge_mask=mask, **mk2)[:, target_idx].sum(dim=1)
         return (pred1 - pred2).abs().item()
 
-    def _compute_diff_node(self, x1: torch.Tensor, x2: torch.Tensor, target_idx: List[int], mask: torch.Tensor) -> float:
+    def _compute_diff_node(self, x1: torch.Tensor, x2: torch.Tensor, target_idx: List[int], mask: torch.Tensor,
+                           model_kwargs1=None, model_kwargs2=None) -> float:
         """Compute absolute prediction difference with given node mask."""
-        pred1 = self.model(x1, node_mask=mask)[:, target_idx].sum(dim=1)
-        pred2 = self.model(x2, node_mask=mask)[:, target_idx].sum(dim=1)
+        mk1 = normalize_model_kwargs(model_kwargs1)
+        mk2 = normalize_model_kwargs(model_kwargs2)
+        pred1 = self.model(x1, node_mask=mask, **mk1)[:, target_idx].sum(dim=1)
+        pred2 = self.model(x2, node_mask=mask, **mk2)[:, target_idx].sum(dim=1)
         return (pred1 - pred2).abs().item() 

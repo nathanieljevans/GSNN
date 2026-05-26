@@ -6,19 +6,22 @@ import pandas as pd
 import torch
 from sklearn.metrics import r2_score
 
+from gsnn.interpret._kwargs_utils import normalize_model_kwargs
+
 
 class ContrastiveGSNNExplainer:
     r"""Edge/node mask optimiser for *contrastive* explanations.
 
     This explainer learns a binary mask *m∈{0,1}^{E|N}* that maximises fidelity
-    between the **prediction difference** on the masked graph and the difference
-    on the full graph, while simultaneously penalising mask size::
+    between the **absolute prediction difference** on the masked graph and the
+    absolute difference on the full graph, while simultaneously penalising mask
+    size::
 
-        Δf(m) = f(x₁; m)[target_idx] − f(x₂; m)[target_idx]   (multivariate)
-        
-        L = MSE(Δf(m), Δf(1))      # over all B×T elements
+        |Δf|(m) = | f(x₁; m)[target_idx] − f(x₂; m)[target_idx] |   (multivariate)
+
+        L = MSE(|Δf|(m), |Δf|(1))      # over all B×T elements
             + β max(0, ‖m‖₁ − free_elements)
-            − λ H(m)               (optional entropy term)
+            − λ H(m)                     (optional entropy term)
 
     Here *m* is obtained via a differentiable Gumbel-Softmax relaxation so the
     optimisation can be performed with vanilla back-prop. After convergence
@@ -26,8 +29,19 @@ class ContrastiveGSNNExplainer:
 
     Interpretation
     --------------
-    * ``score_i → 1``  element i is essential for reproducing the prediction difference.
-    * ``score_i → 0``  element i can be removed without affecting the difference.
+    * ``score_i → 1``  element i is essential for reproducing the magnitude of
+      the prediction difference ``|Δf|``.
+    * ``score_i → 0``  element i can be removed without affecting ``|Δf|``.
+
+    Note
+    ----
+    The objective targets the *magnitude* ``|Δf|`` rather than the signed
+    difference ``Δf``.  A mask that flips the sign of the prediction difference
+    while preserving its magnitude is therefore considered faithful by this
+    objective.  In practice this is rarely an issue because optimisation starts
+    from the full mask (where the sign of ``Δf`` is correct) and progressively
+    sparsifies, but it is worth being aware of for pathological models or
+    aggressive ``beta``.
 
     Parameters
     ----------
@@ -62,6 +76,12 @@ class ContrastiveGSNNExplainer:
         Strength of the entropy bonus (encourages exploration).
     verbose : bool, optional (default=True)
         Print progress information during optimisation.
+    scale_mse_by_variance : bool, optional (default=True)
+        If True, normalise the MSE term by ``Var(target_diffs)`` so that the
+        fidelity loss is scale-invariant across pairs (an ``1 - R²`` style
+        objective).  This makes ``beta`` interpretable across batches whose
+        ``Δf`` magnitudes differ.  Falls back to plain MSE when the target
+        difference tensor has fewer than 2 elements.
 
     Example
     -------
@@ -92,6 +112,7 @@ class ContrastiveGSNNExplainer:
         verbose: bool = True,
         optimizer=torch.optim.Adam,
         entropy: float = 0.0,
+        scale_mse_by_variance: bool = True,
     ) -> None:
         """
         Contrastive version of GSNNExplainer for explaining prediction differences.
@@ -113,6 +134,7 @@ class ContrastiveGSNNExplainer:
         self.data = data
         self.device = 'cuda' if (torch.cuda.is_available() and not ignore_cuda) else 'cpu'
         self.entropy = entropy
+        self.scale_mse_by_variance = scale_mse_by_variance
 
         model = copy.deepcopy(model)
         model = model.eval()
@@ -134,6 +156,8 @@ class ContrastiveGSNNExplainer:
         *,
         return_weights: bool = False,
         target: str = 'edge',
+        model_kwargs1=None,
+        model_kwargs2=None,
     ) -> pd.DataFrame:
         """Compute attributions for *f(x₁) − f(x₂)*.
 
@@ -157,6 +181,12 @@ class ContrastiveGSNNExplainer:
             Whether to return raw weights along with the DataFrame.
         target : str, optional (default='edge')
             Whether to return 'edge' or 'node' level attributions.
+        model_kwargs1, model_kwargs2 : dict, optional (default=None)
+            Per-side keyword arguments forwarded to every ``self.model(x1, ...)``
+            / ``self.model(x2, ...)`` call (e.g. ``{'x_fn': x_fn_1}`` for
+            models trained with ``node_activity=True``). Tensor values must
+            have leading dim equal to ``x1.shape[0]`` / ``x2.shape[0]``.
+            ``edge_mask`` / ``node_mask`` are reserved.
 
         Returns
         -------
@@ -168,9 +198,11 @@ class ContrastiveGSNNExplainer:
             raise ValueError(f"target must be 'edge' or 'node', got '{target}'")
 
         if target == 'edge':
-            return self._explain_edges(x1, x2, target_idx, return_weights)
+            return self._explain_edges(x1, x2, target_idx, return_weights,
+                                       model_kwargs1=model_kwargs1, model_kwargs2=model_kwargs2)
         else:
-            return self._explain_nodes(x1, x2, target_idx, return_weights)
+            return self._explain_nodes(x1, x2, target_idx, return_weights,
+                                       model_kwargs1=model_kwargs1, model_kwargs2=model_kwargs2)
 
     def _explain_edges(
         self,
@@ -178,12 +210,17 @@ class ContrastiveGSNNExplainer:
         x2: torch.Tensor,
         target_idx: Union[int, List[int]],
         return_weights: bool = False,
+        model_kwargs1=None,
+        model_kwargs2=None,
     ) -> pd.DataFrame:
         """Compute edge-level attributions for *f(x₁) − f(x₂)*.
         
         Learns ONE mask across all sample pairs by treating the differences
         as a multi-output objective. This is much faster than per-sample optimization.
         """
+        mk1 = normalize_model_kwargs(model_kwargs1)
+        mk2 = normalize_model_kwargs(model_kwargs2)
+
         x1, x2 = x1.to(self.device), x2.to(self.device)
         
         # Ensure batch dimension
@@ -211,15 +248,17 @@ class ContrastiveGSNNExplainer:
         # Calculate tau decay rate
         tau_decay_rate = (self.min_tau / self.tau0) ** (1 / self.iters)
         
-        # Get target prediction differences for ALL pairs (baseline) - keep as multivariate
+        # Get target |prediction differences| for ALL pairs (baseline) - keep as multivariate
         with torch.no_grad():
-            pred1_full = self.model(x1)[:, target_idx]  # (B, T)
-            pred2_full = self.model(x2)[:, target_idx]  # (B, T)
-            target_diffs = pred1_full - pred2_full  # (B, T) - multivariate differences
+            pred1_full = self.model(x1, **mk1)[:, target_idx]  # (B, T)
+            pred2_full = self.model(x2, **mk2)[:, target_idx]  # (B, T)
+            target_diffs = (pred1_full - pred2_full).abs()  # (B, T) - |Δf|
+
+        target_var = target_diffs.var().detach() if (self.scale_mse_by_variance and target_diffs.numel() > 1) else None
         
         if self.verbose:
             print(f"Batch size: {B}, Target dims: {len(target_idx)}")
-            print(f"Target Δf mean: {target_diffs.mean().item():.6f}, std: {target_diffs.std().item():.6f}")
+            print(f"Target |Δf| mean: {target_diffs.mean().item():.6f}, std: {target_diffs.std().item():.6f}")
         
         # Optimization loop - learns ONE mask for all pairs
         for iter in range(self.iters):
@@ -233,12 +272,14 @@ class ContrastiveGSNNExplainer:
             edge_mask_batch = edge_weight.view(1, -1).expand(B, -1)  # (B, E)
             
             # Forward pass for all pairs at once - keep as multivariate
-            pred1 = self.model(x1, edge_mask=edge_mask_batch)[:, target_idx]  # (B, T)
-            pred2 = self.model(x2, edge_mask=edge_mask_batch)[:, target_idx]  # (B, T)
-            masked_diffs = pred1 - pred2  # (B, T) - multivariate differences
+            pred1 = self.model(x1, edge_mask=edge_mask_batch, **mk1)[:, target_idx]  # (B, T)
+            pred2 = self.model(x2, edge_mask=edge_mask_batch, **mk2)[:, target_idx]  # (B, T)
+            masked_diffs = (pred1 - pred2).abs()  # (B, T) - |Δf|
             
             # MSE over all B*T elements
             mse = crit(masked_diffs, target_diffs)
+            if target_var is not None:
+                mse = mse / (target_var + 1e-8)
             
             edge_probs, _ = torch.nn.functional.softmax(edge_params, dim=0)
             m = torch.distributions.Bernoulli(probs=edge_probs)
@@ -267,9 +308,9 @@ class ContrastiveGSNNExplainer:
                 subset_mask = (final_edge_probs > 0.5).float()
                 subset_mask_batch = subset_mask.view(1, -1).expand(B, -1)
                 
-                pred1_sub = self.model(x1, edge_mask=subset_mask_batch)[:, target_idx]  # (B, T)
-                pred2_sub = self.model(x2, edge_mask=subset_mask_batch)[:, target_idx]  # (B, T)
-                subset_diffs = pred1_sub - pred2_sub  # (B, T)
+                pred1_sub = self.model(x1, edge_mask=subset_mask_batch, **mk1)[:, target_idx]  # (B, T)
+                pred2_sub = self.model(x2, edge_mask=subset_mask_batch, **mk2)[:, target_idx]  # (B, T)
+                subset_diffs = (pred1_sub - pred2_sub).abs()  # (B, T) - |Δf|
                 
                 subset_mse = torch.nn.functional.mse_loss(subset_diffs, target_diffs).item()
                 subset_r2 = r2_score(
@@ -283,8 +324,8 @@ class ContrastiveGSNNExplainer:
                 print("POST-TRAINING EVALUATION (edges > 0.5)")
                 print("=" * 50)
                 print(f"Selected edges: {num_selected} / {self.E} ({100 * num_selected / self.E:.1f}%)")
-                print(f"Target Δf mean: {target_diffs.mean().item():.6f}")
-                print(f"Subset Δf mean: {subset_diffs.mean().item():.6f}")
+                print(f"Target |Δf| mean: {target_diffs.mean().item():.6f}")
+                print(f"Subset |Δf| mean: {subset_diffs.mean().item():.6f}")
                 print(f"MSE: {subset_mse:.6f}")
                 print(f"R² (across {B}x{len(target_idx)} elements): {subset_r2:.4f}")
                 print("=" * 50)
@@ -310,12 +351,17 @@ class ContrastiveGSNNExplainer:
         x2: torch.Tensor,
         target_idx: Union[int, List[int]],
         return_weights: bool = False,
+        model_kwargs1=None,
+        model_kwargs2=None,
     ) -> pd.DataFrame:
         """Compute node-level attributions for *f(x₁) − f(x₂)*.
         
         Learns ONE mask across all sample pairs by treating the differences
         as a multi-output objective. This is much faster than per-sample optimization.
         """
+        mk1 = normalize_model_kwargs(model_kwargs1)
+        mk2 = normalize_model_kwargs(model_kwargs2)
+
         x1, x2 = x1.to(self.device), x2.to(self.device)
         
         # Ensure batch dimension
@@ -343,15 +389,17 @@ class ContrastiveGSNNExplainer:
         # Calculate tau decay rate
         tau_decay_rate = (self.min_tau / self.tau0) ** (1 / self.iters)
         
-        # Get target prediction differences for ALL pairs (baseline) - keep as multivariate
+        # Get target |prediction differences| for ALL pairs (baseline) - keep as multivariate
         with torch.no_grad():
-            pred1_full = self.model(x1)[:, target_idx]  # (B, T)
-            pred2_full = self.model(x2)[:, target_idx]  # (B, T)
-            target_diffs = pred1_full - pred2_full  # (B, T) - multivariate differences
+            pred1_full = self.model(x1, **mk1)[:, target_idx]  # (B, T)
+            pred2_full = self.model(x2, **mk2)[:, target_idx]  # (B, T)
+            target_diffs = (pred1_full - pred2_full).abs()  # (B, T) - |Δf|
+
+        target_var = target_diffs.var().detach() if (self.scale_mse_by_variance and target_diffs.numel() > 1) else None
         
         if self.verbose:
             print(f"Batch size: {B}, Target dims: {len(target_idx)}")
-            print(f"Target Δf mean: {target_diffs.mean().item():.6f}, std: {target_diffs.std().item():.6f}")
+            print(f"Target |Δf| mean: {target_diffs.mean().item():.6f}, std: {target_diffs.std().item():.6f}")
         
         # Optimization loop - learns ONE mask for all pairs
         for iter in range(self.iters):
@@ -365,12 +413,14 @@ class ContrastiveGSNNExplainer:
             node_mask_batch = node_weight.view(1, -1).expand(B, -1)  # (B, N)
             
             # Forward pass for all pairs at once - keep as multivariate
-            pred1 = self.model(x1, node_mask=node_mask_batch)[:, target_idx]  # (B, T)
-            pred2 = self.model(x2, node_mask=node_mask_batch)[:, target_idx]  # (B, T)
-            masked_diffs = pred1 - pred2  # (B, T) - multivariate differences
+            pred1 = self.model(x1, node_mask=node_mask_batch, **mk1)[:, target_idx]  # (B, T)
+            pred2 = self.model(x2, node_mask=node_mask_batch, **mk2)[:, target_idx]  # (B, T)
+            masked_diffs = (pred1 - pred2).abs()  # (B, T) - |Δf|
             
             # MSE over all B*T elements
             mse = crit(masked_diffs, target_diffs)
+            if target_var is not None:
+                mse = mse / (target_var + 1e-8)
             
             node_probs, _ = torch.nn.functional.softmax(node_params, dim=0)
             m = torch.distributions.Bernoulli(probs=node_probs)
@@ -399,9 +449,9 @@ class ContrastiveGSNNExplainer:
                 subset_mask = (final_node_probs > 0.5).float()
                 subset_mask_batch = subset_mask.view(1, -1).expand(B, -1)
                 
-                pred1_sub = self.model(x1, node_mask=subset_mask_batch)[:, target_idx]  # (B, T)
-                pred2_sub = self.model(x2, node_mask=subset_mask_batch)[:, target_idx]  # (B, T)
-                subset_diffs = pred1_sub - pred2_sub  # (B, T)
+                pred1_sub = self.model(x1, node_mask=subset_mask_batch, **mk1)[:, target_idx]  # (B, T)
+                pred2_sub = self.model(x2, node_mask=subset_mask_batch, **mk2)[:, target_idx]  # (B, T)
+                subset_diffs = (pred1_sub - pred2_sub).abs()  # (B, T) - |Δf|
                 
                 subset_mse = torch.nn.functional.mse_loss(subset_diffs, target_diffs).item()
                 subset_r2 = r2_score(
@@ -415,8 +465,8 @@ class ContrastiveGSNNExplainer:
                 print("POST-TRAINING EVALUATION (nodes > 0.5)")
                 print("=" * 50)
                 print(f"Selected nodes: {num_selected} / {self.N} ({100 * num_selected / self.N:.1f}%)")
-                print(f"Target Δf mean: {target_diffs.mean().item():.6f}")
-                print(f"Subset Δf mean: {subset_diffs.mean().item():.6f}")
+                print(f"Target |Δf| mean: {target_diffs.mean().item():.6f}")
+                print(f"Subset |Δf| mean: {subset_diffs.mean().item():.6f}")
                 print(f"MSE: {subset_mse:.6f}")
                 print(f"R² (across {B}x{len(target_idx)} elements): {subset_r2:.4f}")
                 print("=" * 50)
@@ -516,7 +566,8 @@ class ContrastiveGSNNExplainer:
             'min_tau': self.min_tau,
             'hard': self.hard,
             'entropy': self.entropy,
-            'verbose': self.verbose
+            'verbose': self.verbose,
+            'scale_mse_by_variance': self.scale_mse_by_variance
         }
         
         # Apply parameter overrides
@@ -538,11 +589,13 @@ class ContrastiveGSNNExplainer:
             optim = self.optimizer([params], lr=self.lr, weight_decay=self.weight_decay)
             tau_decay_rate = (self.min_tau / self.tau0) ** (1 / self.iters)
             
-            # Get target differences for ALL pairs - keep as multivariate
+            # Get target |differences| for ALL pairs - keep as multivariate
             with torch.no_grad():
                 pred1_full = self.model(x1)[:, target_idx] if target_idx else self.model(x1)  # (B, T)
                 pred2_full = self.model(x2)[:, target_idx] if target_idx else self.model(x2)  # (B, T)
-                target_diffs = pred1_full - pred2_full  # (B, T) - multivariate
+                target_diffs = (pred1_full - pred2_full).abs()  # (B, T) - |Δf|
+
+            target_var = target_diffs.var().detach() if (self.scale_mse_by_variance and target_diffs.numel() > 1) else None
             
             # Training loop - single mask for all pairs
             for iter in range(self.iters):
@@ -560,8 +613,10 @@ class ContrastiveGSNNExplainer:
                     pred1 = self.model(x1, node_mask=mask_batch)[:, target_idx] if target_idx else self.model(x1, node_mask=mask_batch)  # (B, T)
                     pred2 = self.model(x2, node_mask=mask_batch)[:, target_idx] if target_idx else self.model(x2, node_mask=mask_batch)  # (B, T)
                 
-                masked_diffs = pred1 - pred2  # (B, T) - multivariate
+                masked_diffs = (pred1 - pred2).abs()  # (B, T) - |Δf|
                 mse = crit(masked_diffs, target_diffs)
+                if target_var is not None:
+                    mse = mse / (target_var + 1e-8)
                 
                 probs, _ = torch.nn.functional.softmax(params, dim=0)
                 m = torch.distributions.Bernoulli(probs=probs)
@@ -584,7 +639,7 @@ class ContrastiveGSNNExplainer:
                     pred1_sub = self.model(x1, node_mask=subset_mask_batch)[:, target_idx] if target_idx else self.model(x1, node_mask=subset_mask_batch)  # (B, T)
                     pred2_sub = self.model(x2, node_mask=subset_mask_batch)[:, target_idx] if target_idx else self.model(x2, node_mask=subset_mask_batch)  # (B, T)
                 
-                subset_diffs = pred1_sub - pred2_sub  # (B, T) - multivariate
+                subset_diffs = (pred1_sub - pred2_sub).abs()  # (B, T) - |Δf|
                 # Fidelity based on MSE (lower is better, so 1 - normalized_mse)
                 mse_val = torch.nn.functional.mse_loss(subset_diffs, target_diffs).item()
                 target_var = target_diffs.var().item() + 1e-8

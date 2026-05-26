@@ -41,6 +41,7 @@ class GroupRMSNorm(torch.nn.Module):
             self.register_parameter('gamma', None)
 
     def forward(self, x):
+        """Normalize by group RMS; accepts ``(B, C)`` or ``(B, C, 1)``."""
         # Handle input shape (B, C) or (B, C, 1)
         original_shape = x.shape
         x = x.squeeze(-1)  # Ensure (B, C) shape

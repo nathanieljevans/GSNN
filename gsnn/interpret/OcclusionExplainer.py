@@ -3,6 +3,11 @@ import torch
 import copy
 import pandas as pd
 
+from gsnn.interpret._kwargs_utils import (
+    normalize_model_kwargs,
+    tile_for_grid,
+)
+
 
 class OcclusionExplainer:
     r"""Edge/node occlusion explainer for single observations.
@@ -77,7 +82,7 @@ class OcclusionExplainer:
         self.N = model.num_nodes
 
 
-    def explain(self, x, target_idx, element_mask=None, target='edge', reduction='mean'):
+    def explain(self, x, target_idx, element_mask=None, target='edge', reduction='mean', model_kwargs=None):
         """Compute edge or node occlusion attributions for *f(x)[target_idx]*.
 
         Parameters
@@ -97,6 +102,12 @@ class OcclusionExplainer:
             - 'mean': average attributions across samples (default)
             - 'sum': sum attributions across samples
             - 'none': return all per-sample attributions (adds 'sample_idx' column)
+        model_kwargs : dict, optional (default=None)
+            Extra keyword arguments forwarded to every ``self.model(...)`` call
+            (e.g. ``{'x_fn': x_fn}`` for models trained with ``node_activity=True``).
+            Tensor values must have leading dim equal to ``x.shape[0]`` (or 1 to
+            broadcast); they will be tiled to match the per-element-occluded
+            grid. ``edge_mask`` / ``node_mask`` are reserved.
 
         Returns
         -------
@@ -113,11 +124,11 @@ class OcclusionExplainer:
             raise ValueError(f"reduction must be 'mean', 'sum', or 'none', got '{reduction}'")
 
         if target == 'edge':
-            return self._explain_edges(x, target_idx, element_mask, reduction)
+            return self._explain_edges(x, target_idx, element_mask, reduction, model_kwargs=model_kwargs)
         else:
-            return self._explain_nodes(x, target_idx, element_mask, reduction)
+            return self._explain_nodes(x, target_idx, element_mask, reduction, model_kwargs=model_kwargs)
 
-    def _explain_edges(self, x, target_idx, element_mask=None, reduction='mean'):
+    def _explain_edges(self, x, target_idx, element_mask=None, reduction='mean', model_kwargs=None):
         """
         Compute edge-level attributions using occlusion.
         
@@ -139,6 +150,8 @@ class OcclusionExplainer:
             If reduction='none': additional 'sample_idx' column.
         """
         
+        model_kwargs = normalize_model_kwargs(model_kwargs)
+
         x = x.to(self.device)
         if x.dim() == 1:
             x = x.unsqueeze(0)  # Ensure batch dimension
@@ -158,7 +171,7 @@ class OcclusionExplainer:
         # 2. Compute occlusion scores (batched across all samples)
         # ------------------------------------------------------------------
         # Compute baseline prediction (all edges present)
-        baseline_pred = self.model(x)[:, target_idx].detach()  # (B,)
+        baseline_pred = self.model(x, **model_kwargs)[:, target_idx].detach()  # (B,)
 
         B = x.size(0)  # batch size
 
@@ -186,8 +199,13 @@ class OcclusionExplainer:
                 batch_masks_expanded = batch_masks.unsqueeze(1).repeat(1, B, 1)  # (BB, B, E)
                 batch_masks_expanded = batch_masks_expanded.view(-1, self.E)  # (BB*B, E)
 
+                # Tile any per-sample model_kwargs (e.g. x_fn) across the BB
+                # occluded-edge grid so the model sees one entry per
+                # replicated x.
+                mk_tiled = tile_for_grid(model_kwargs, BB, B)
+
                 # Forward pass
-                preds = self.model(x_batch, edge_mask=batch_masks_expanded)[:, target_idx]  # (BB*B,)
+                preds = self.model(x_batch, edge_mask=batch_masks_expanded, **mk_tiled)[:, target_idx]  # (BB*B,)
                 preds = preds.view(BB, B)  # (BB, B)
 
                 # Compute occlusion effects: baseline - occluded
@@ -232,7 +250,7 @@ class OcclusionExplainer:
             'score': scores
         })
 
-    def _explain_nodes(self, x, target_idx, element_mask=None, reduction='mean'):
+    def _explain_nodes(self, x, target_idx, element_mask=None, reduction='mean', model_kwargs=None):
         """
         Compute node-level attributions using occlusion.
         
@@ -254,6 +272,8 @@ class OcclusionExplainer:
             If reduction='none': additional 'sample_idx' column.
         """
         
+        model_kwargs = normalize_model_kwargs(model_kwargs)
+
         x = x.to(self.device)
         if x.dim() == 1:
             x = x.unsqueeze(0)  # Ensure batch dimension
@@ -275,7 +295,7 @@ class OcclusionExplainer:
         # 2. Compute occlusion scores (batched across all samples)
         # ------------------------------------------------------------------
         # Compute baseline prediction (all nodes present)
-        baseline_pred = self.model(x)[:, target_idx].detach()  # (B,)
+        baseline_pred = self.model(x, **model_kwargs)[:, target_idx].detach()  # (B,)
 
         # Initialize scores with NaN for nodes not being occluded
         occlusion_scores = torch.full((B, self.N), float('nan'), device=self.device)
@@ -300,8 +320,12 @@ class OcclusionExplainer:
                 batch_masks_expanded = batch_masks.unsqueeze(1).repeat(1, B, 1)  # (NN, B, N)
                 batch_masks_expanded = batch_masks_expanded.view(-1, self.N)  # (NN*B, N)
 
+                # Tile per-sample model_kwargs (e.g. x_fn) across the NN
+                # occluded-node grid.
+                mk_tiled = tile_for_grid(model_kwargs, NN, B)
+
                 # Forward pass
-                preds = self.model(x_batch, node_mask=batch_masks_expanded)[:, target_idx]  # (NN*B,)
+                preds = self.model(x_batch, node_mask=batch_masks_expanded, **mk_tiled)[:, target_idx]  # (NN*B,)
                 preds = preds.view(NN, B)  # (NN, B)
                 
                 # Compute occlusion effects: baseline - occluded

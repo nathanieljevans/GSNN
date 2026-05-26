@@ -5,7 +5,8 @@ Applies 1d layer normalization within each provided channel groups.
 import torch 
 import torch_geometric as pyg
 
-class GroupLayerNorm(torch.nn.Module): 
+class GroupLayerNorm(torch.nn.Module):
+    """Layer normalization computed separately within each channel group."""
 
     def __init__(self, channel_groups, eps=1e-1, affine=True): 
         '''
@@ -28,7 +29,8 @@ class GroupLayerNorm(torch.nn.Module):
             self.gamma = torch.nn.Parameter(torch.ones(N))
             self.beta = torch.nn.Parameter(torch.zeros(N))
 
-    def forward(self, x): 
+    def forward(self, x):
+        """Normalize ``x`` with shape ``(B, C, 1)`` or squeezed ``(B, C)``; returns ``(B, C, 1)``."""
 
         x = x.squeeze(-1)
 
