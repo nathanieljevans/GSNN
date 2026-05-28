@@ -87,6 +87,21 @@ At equilibrium, if `i → j` already exists in `G`, the model is locally optimal
 - Validation by "do known edges score high?" is the wrong test.
 - Validate via **edge-masking**: zero a sampled subset of existing edges through `GSNN.forward(x, edge_mask=...)` (already supported), recompute the score, and check whether the masked edges re-emerge as positives. The model is no longer at equilibrium for masked edges, so the absorption goes away.
 
+### 4.6 Post-hoc shared-embedding link predictor (`MagnitudeEdgeKGE`)
+
+The online auxiliary KGE and the two-relation ComplEx^2 fusion variants were retired in favor of a **post-hoc shared-embedding link predictor** (node2vec-style):
+
+1. **Stage 1 — MEI.** Train GSNN on `G_partial`, then run `MagnitudeEdgeInferer.fit()` to accumulate full-dataset magnitude correlations. Threshold the score table (BH-FDR or top-K per target) to obtain inferred positive edges. Held-out benchmark edges are excluded via `exclude_edges`.
+2. **Stage 2 — Embedding.** Pool kept function→function edges and MEI-inferred edges into a single augmented directed graph. Learn one shared node embedding table by skip-gram with negative sampling on random walks over this graph. All edges — kept and inferred — push the same embeddings; there is no relation separation.
+
+Random-walk transition probabilities are weighted by `max(MEI corr, 0) ** walk_alpha` (controlled by `walk_corr_weighted` and `walk_alpha`). This re-introduces MEI's continuous signal that the binary mining step would otherwise discard: high-correlation edges are traversed more often and contribute proportionally more skip-gram positives. Kept edges receive weight `max(corr_kept, max_inferred_weight)` (or override via `kept_edge_weight`) so they are at least as likely to be walked as the strongest inferred edge.
+
+Held-out edges are scored by the dot product of node embeddings. The structural prior from the kept graph regularizes the inferred-edge geometry through transitivity (paths in the augmented graph pull connected nodes together), at parameter cost `O(N · d)`.
+
+Empirically on small toy graphs the raw MEI correlation score (full continuous signal) is hard to beat. Corr-weighted walks narrow the gap by preserving MEI's continuous information through the walk distribution. The embedding becomes most competitive when the graph is large enough that (a) MEI per-edge estimates are noisy and (b) kept-graph topology meaningfully constrains inferred-edge geometry.
+
+Implementation: `gsnn/optim/MagnitudeEdgeKGE.py`. Tutorial: `docs/tutorials/17_kge_edge_inferrer.ipynb`. No external dependencies (no `complex2`).
+
 ---
 
 ## 5. Tier 1–3 — dual encoder
